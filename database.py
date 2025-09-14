@@ -35,7 +35,7 @@ async def execute_sql_query(db_pool, sql_query: str, params: Optional[tuple] = N
         raise DatabaseError(f"An unexpected error occurred: {e}")
 
 async def save_chat_to_db(db_pool, chat_id: int, user: types.Content, bot: types.Content):
-    """Fungsi untuk menyimpan chat ke database, maksimal 10 chat, dan menghapus yang terlama jika ada yang baru."""
+    """Fungsi untuk menyimpan chat ke database."""
     try:
        user_json = json.dumps(content_to_dict(user))
        bot_json = json.dumps(content_to_dict(bot))
@@ -46,17 +46,6 @@ async def save_chat_to_db(db_pool, chat_id: int, user: types.Content, bot: types
                 query = "INSERT INTO chat_history (chat_id, user, bot) VALUES (%s, %s, %s)"
                 await cursor.execute(query, (chat_id, user_json, bot_json))
                 await conn.commit()
-
-               # Hitung jumlah chat untuk chat_id ini
-                await cursor.execute("SELECT COUNT(*) FROM chat_history WHERE chat_id = %s", (chat_id,))
-                count = (await cursor.fetchone())[0]
-
-                # Jika lebih dari 10, hapus chat yang paling lama
-                if count > 10:
-                    await cursor.execute("SELECT id FROM chat_history WHERE chat_id = %s ORDER BY id ASC LIMIT 1", (chat_id,))
-                    oldest_id = (await cursor.fetchone())[0]
-                    await cursor.execute("DELETE FROM chat_history WHERE id = %s", (oldest_id,))
-                    await conn.commit()
 
     except aiomysql.Error as err:
         logging.error(f"Error saving chat to database: {err}")
@@ -79,6 +68,9 @@ async def get_chat_history_from_db(db_pool, chat_id: int) -> Optional[List[types
         
         contents = []
         for row in results:
+            # Skip rows where user or bot might be null (e.g. admin messages)
+            if not row['user'] or not row['bot']:
+                continue
             user_content = json.loads(row['user'])
             bot_content = json.loads(row['bot'])
             
@@ -110,3 +102,94 @@ async def delete_chat_history_from_db(db_pool, chat_id: int):
     except Exception as e:
         logging.exception(f"An unexpected error occurred while deleting chat history: {e}")
         raise DatabaseError(f"An unexpected error occurred while deleting chat history: {e}")
+
+async def get_all_chat_ids(db_pool) -> Optional[List[str]]:
+    """Fungsi untuk mengambil semua chat_id unik dari database."""
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                query = "SELECT DISTINCT chat_id FROM chat_history ORDER BY chat_id ASC"
+                await cursor.execute(query)
+                results = await cursor.fetchall()
+        return [row[0] for row in results] if results else []
+    except aiomysql.Error as err:
+        logging.error(f"Error retrieving all chat IDs: {err}")
+        raise DatabaseError(f"Error retrieving all chat IDs: {err}")
+
+async def get_chat_history_for_admin(db_pool, chat_id: int) -> Optional[List[dict]]:
+    """Fungsi untuk mengambil riwayat chat dari database untuk admin UI."""
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                query = "SELECT user, bot FROM chat_history WHERE chat_id = %s ORDER BY id ASC"
+                await cursor.execute(query, (chat_id,))
+                results = await cursor.fetchall()
+
+        if not results:
+            return None
+        
+        history = []
+        for row in results:
+            history.append({
+                'user': json.loads(row['user']) if row['user'] else None,
+                'bot': json.loads(row['bot']) if row['bot'] else None
+            })
+        return history
+    except aiomysql.Error as err:
+        logging.error(f"Error retrieving chat history for admin: {err}")
+        raise DatabaseError(f"Error retrieving chat history for admin: {err}")
+
+async def get_control_status(db_pool, chat_id: str) -> str:
+    """Mendapatkan status kendali untuk sebuah chat_id."""
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                query = "SELECT controlled_by FROM conversation_control WHERE chat_id = %s"
+                await cursor.execute(query, (chat_id,))
+                result = await cursor.fetchone()
+        return result[0] if result else 'bot'
+    except aiomysql.Error as err:
+        logging.error(f"Error getting control status: {err}")
+        raise DatabaseError(f"Error getting control status: {err}")
+
+async def set_control_status(db_pool, chat_id: str, status: str):
+    """Mengatur status kendali (bot/admin) untuk sebuah chat_id."""
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                query = "INSERT INTO conversation_control (chat_id, controlled_by) VALUES (%s, %s) ON DUPLICATE KEY UPDATE controlled_by = VALUES(controlled_by)"
+                await cursor.execute(query, (chat_id, status))
+                await conn.commit()
+    except aiomysql.Error as err:
+        logging.error(f"Error setting control status: {err}")
+        raise DatabaseError(f"Error setting control status: {err}")
+
+async def save_admin_reply(db_pool, chat_id: str, admin_text: str):
+    """Menyimpan balasan dari admin ke chat history."""
+    try:
+        # Pesan admin disimpan di kolom 'bot', dengan kolom 'user' menandakan aksi admin
+        admin_reply_content = types.Content(role="model", parts=[types.Part.from_text(admin_text)])
+        bot_json = json.dumps(content_to_dict(admin_reply_content))
+
+        async with db_pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                query = "INSERT INTO chat_history (chat_id, user, bot) VALUES (%s, NULL, %s)"
+                await cursor.execute(query, (chat_id, bot_json))
+                await conn.commit()
+    except aiomysql.Error as err:
+        logging.error(f"Error saving admin reply: {err}")
+        raise DatabaseError(f"Error saving admin reply: {err}")
+
+async def save_user_message_only(db_pool, chat_id: str, user_content: types.Content):
+    """Menyimpan pesan dari user saja, saat admin sedang mengontrol."""
+    try:
+        user_json = json.dumps(content_to_dict(user_content))
+        async with db_pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                # Hanya user yang diisi, bot diisi NULL
+                query = "INSERT INTO chat_history (chat_id, user, bot) VALUES (%s, %s, NULL)"
+                await cursor.execute(query, (chat_id, user_json))
+                await conn.commit()
+    except aiomysql.Error as err:
+        logging.error(f"Error saving user-only message: {err}")
+        raise DatabaseError(f"Error saving user-only message: {err}")

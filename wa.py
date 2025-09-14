@@ -2,28 +2,32 @@ import asyncio
 import logging
 import json
 import aiohttp
-import aiohttp.web
+from aiohttp import web
 import aiomysql
 from google import genai
 from google.genai import types
 from google.genai.types import GenerateContentConfig
 from typing import Optional, List
+import pathlib
+from collections import defaultdict
 
 # Import dari modul-modul yang telah dibuat
 import config
 import database
 import tools
 import whatsapp_service
+from utils import content_to_dict
 
 # Konfigurasi library dan inisialisasi Klien
 client = genai.Client(api_key=config.GOOGLE_API_KEY)
 
-# Variabel global untuk koneksi database
+# --- Variabel Global ---
 db_pool = None
-
-# Konfigurasi logging
 logging.basicConfig(level=logging.INFO)
+BASE_DIR = pathlib.Path(__file__).parent
+TEMPLATES_DIR = BASE_DIR / 'templates'
 
+# --- Logika Inti Bot ---
 async def generate_gemini_response(content: types.Content, chat_id: int, chat_history: Optional[List[types.Content]] = None):
     """Generates a Gemini response with optional chat history."""
     global db_pool
@@ -70,11 +74,14 @@ async def generate_gemini_response(content: types.Content, chat_id: int, chat_hi
         logging.exception("Error generating Gemini response:")
         await whatsapp_service.send_whatsapp_message(chat_id, "Maaf, terjadi kesalahan saat memproses permintaan Anda.", vars(config))
 
-async def handle_whatsapp_message(message_data: dict):
-    """Handles incoming WhatsApp messages."""
+async def handle_whatsapp_message(message_data: dict, app: web.Application):
+    """Handles incoming WhatsApp messages based on control status."""
     global db_pool
+    recipient_number = message_data['from']
+    
     try:
-        recipient_number = message_data['from']
+        control_status = await database.get_control_status(db_pool, recipient_number)
+        
         parts = []
         message_text = None
 
@@ -100,66 +107,182 @@ async def handle_whatsapp_message(message_data: dict):
                 parts.append(types.Part.from_uri(file_uri=media_url, mime_type=mime_type))
         
         if not parts:
-            await whatsapp_service.send_whatsapp_message(recipient_number, "Maaf, I couldn't understand your input.", vars(config))
             return
-       
-        content = types.Content(role="user", parts=parts)
-        chat_history = await database.get_chat_history_from_db(db_pool, recipient_number)
-        await generate_gemini_response(content, recipient_number, chat_history)
 
-    except database.DatabaseError as e:
-         logging.error(f"Error processing message: {e}")
-         await whatsapp_service.send_whatsapp_message(recipient_number, "Maaf, terjadi kesalahan saat memproses permintaan Anda.", vars(config))
+        content = types.Content(role="user", parts=parts)
+
+        if control_status == 'admin':
+            logging.info(f"Chat for {recipient_number} is admin-controlled. Storing message and notifying UI.")
+            await database.save_user_message_only(db_pool, recipient_number, content)
+            message_to_broadcast = {
+                'type': 'new_message',
+                'data': {
+                    'user': content_to_dict(content),
+                    'bot': None
+                }
+            }
+            for ws in app['websockets'].get(recipient_number, []):
+                await ws.send_json(message_to_broadcast)
+            return
+
+        elif control_status == 'bot':
+            logging.info(f"Chat for {recipient_number} is bot-controlled. Generating AI response.")
+            chat_history = await database.get_chat_history_from_db(db_pool, recipient_number)
+            await generate_gemini_response(content, recipient_number, chat_history)
+
     except Exception as e:
         logging.exception("Error processing message:")
-        await whatsapp_service.send_whatsapp_message(recipient_number, "Maaf, terjadi kesalahan saat memproses pesan Anda.", vars(config))
+        await whatsapp_service.send_whatsapp_message(recipient_number, "Maaf, terjadi kesalahan.", vars(config))
 
 async def whatsapp_webhook_handler(request):
-    """Handles incoming WhatsApp webhook requests."""
     if request.method == 'GET':
         verify_token = request.query.get('hub.verify_token')
         challenge = request.query.get('hub.challenge')
         
         if verify_token == config.WHATSAPP_VERIFY_TOKEN:
-            return aiohttp.web.Response(text=challenge, status=200)
+            return web.Response(text=challenge, status=200)
         else:
-            return aiohttp.web.Response(text='Error, invalid verification token', status=403)
+            return web.Response(text='Error, invalid verification token', status=403)
     elif request.method == 'POST':
         try:
           data = await request.json()
-          logging.info(f"Received WhatsApp webhook: {data}")
           if data.get("entry"):
             for entry in data.get("entry"):
                  for change in entry.get("changes"):
                       if change.get("value", {}).get("messages"):
                           for message in change.get("value", {}).get("messages"):
-                            await handle_whatsapp_message(message)
+                            await handle_whatsapp_message(message, request.app)
         except Exception as e:
           logging.exception(f"Error handling webhook: {e}")
 
-        return aiohttp.web.Response(status=200)
+        return web.Response(status=200)
+
+async def admin_dashboard(request):
+    index_path = TEMPLATES_DIR / 'index.html'
+    try:
+        with open(index_path, 'r') as f:
+            return web.Response(text=f.read(), content_type='text/html')
+    except FileNotFoundError:
+        return web.Response(text="Admin page not found.", status=404)
+
+async def get_conversations(request):
+    global db_pool
+    try:
+        chat_ids = await database.get_all_chat_ids(db_pool)
+        return web.json_response(chat_ids)
+    except database.DatabaseError as e:
+        return web.json_response({'error': str(e)}, status=500)
+
+async def get_conversation_history(request):
+    global db_pool
+    chat_id = request.match_info.get('chat_id')
+    if not chat_id:
+        return web.json_response({'error': 'Chat ID is required'}, status=400)
+    
+    try:
+        history = await database.get_chat_history_for_admin(db_pool, chat_id)
+        if history is None:
+            return web.json_response({'error': 'No history found for this chat ID'}, status=404)
+        return web.json_response(history)
+    except database.DatabaseError as e:
+        return web.json_response({'error': str(e)}, status=500)
+
+async def get_control_status_handler(request):
+    chat_id = request.match_info.get('chat_id')
+    status = await database.get_control_status(db_pool, chat_id)
+    return web.json_response({'controlled_by': status})
+
+async def set_control_status_handler(request):
+    chat_id = request.match_info.get('chat_id')
+    data = await request.json()
+    new_status = data.get('status')
+    if new_status not in ['bot', 'admin']:
+        return web.json_response({'error': 'Invalid status'}, status=400)
+    
+    await database.set_control_status(db_pool, chat_id, new_status)
+    return web.json_response({'success': True, 'new_status': new_status})
+
+async def admin_reply_handler(request):
+    chat_id = request.match_info.get('chat_id')
+    data = await request.json()
+    text = data.get('text')
+    if not text:
+        return web.json_response({'error': 'Text is required'}, status=400)
+
+    try:
+        await whatsapp_service.send_whatsapp_message(chat_id, text, vars(config))
+        await database.save_admin_reply(db_pool, chat_id, text)
+        
+        message_to_broadcast = {
+            'type': 'new_message',
+            'data': {
+                'user': None,
+                'bot': {'role': 'admin', 'parts': [{'text': text}]}
+            }
+        }
+        for ws in request.app['websockets'].get(chat_id, []):
+            await ws.send_json(message_to_broadcast)
+            
+        return web.json_response({'success': True})
+    except Exception as e:
+        logging.error(f"Error sending admin reply: {e}")
+        return web.json_response({'error': 'Failed to send message'}, status=500)
+
+async def websocket_handler(request):
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    
+    chat_id = request.query.get('chat_id')
+    if not chat_id:
+        await ws.close(code=1008, message=b'Chat ID not provided')
+        return ws
+
+    request.app['websockets'][chat_id].append(ws)
+    logging.info(f"WebSocket connection established for chat_id: {chat_id}")
+
+    try:
+        async for msg in ws:
+            pass
+    except Exception as e:
+        logging.error(f"WebSocket error: {e}")
+    finally:
+        if ws in request.app['websockets'][chat_id]:
+            request.app['websockets'][chat_id].remove(ws)
+        logging.info(f"WebSocket connection closed for chat_id: {chat_id}")
+
+    return ws
 
 async def main():
     global db_pool
     db_pool = await aiomysql.create_pool(
-        host=config.MYSQL_HOST,
-        user=config.MYSQL_USER,
-        password=config.MYSQL_PASSWORD,
-        db=config.MYSQL_DATABASE,
-        autocommit=True,
-        loop=asyncio.get_event_loop()
+        host=config.MYSQL_HOST, user=config.MYSQL_USER, password=config.MYSQL_PASSWORD,
+        db=config.MYSQL_DATABASE, autocommit=True, loop=asyncio.get_event_loop()
     )
     
-    app = aiohttp.web.Application()
-    app.add_routes([aiohttp.web.get('/whatsapp/webhook', whatsapp_webhook_handler),
-                    aiohttp.web.post('/whatsapp/webhook', whatsapp_webhook_handler)])
+    app = web.Application()
+    app['websockets'] = defaultdict(list)
 
-    runner = aiohttp.web.AppRunner(app)
+    app.add_routes([
+        web.get('/whatsapp/webhook', whatsapp_webhook_handler),
+        web.post('/whatsapp/webhook', whatsapp_webhook_handler),
+        web.get('/admin', admin_dashboard),
+        web.get('/api/conversations', get_conversations),
+        web.get('/api/conversations/{chat_id}', get_conversation_history),
+        web.get('/api/conversations/{chat_id}/control', get_control_status_handler),
+        web.post('/api/conversations/{chat_id}/control', set_control_status_handler),
+        web.post('/api/conversations/{chat_id}/reply', admin_reply_handler),
+        web.get('/ws', websocket_handler),
+    ])
+
+    app.router.add_static('/static/', path=str(BASE_DIR / 'static'), name='static')
+
+    runner = web.AppRunner(app)
     await runner.setup()
-    site = aiohttp.web.TCPSite(runner, 'localhost', 8123)
+    site = web.TCPSite(runner, 'localhost', 8123)
     await site.start()
 
     logging.info("Server started, listening on http://localhost:8123")
+    logging.info("Admin UI available at http://localhost:8123/admin")
     
     try:
        while True:
