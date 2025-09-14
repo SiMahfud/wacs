@@ -224,11 +224,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const messageContainer = document.createElement('div');
         messageContainer.className = 'message-container';
 
-        let textContent = '';
-        messageContent.parts.forEach(part => {
-            if (part.text) textContent += part.text + '\n';
-        });
-
         const messageElement = document.createElement('div');
         const messageClass = type === 'admin-message' ? 'bot-message admin-reply' : type;
         messageElement.className = `message ${messageClass}`;
@@ -243,15 +238,52 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             roleElement.textContent = 'Assistant';
         }
-
-        const textElement = document.createElement('div');
-        textElement.className = 'message-text';
-        textElement.innerText = textContent.trim();
-
         messageElement.appendChild(roleElement);
-        messageElement.appendChild(textElement);
-        messageContainer.appendChild(messageElement);
 
+        // Process and append parts
+        messageContent.parts.forEach(part => {
+            if (part.text) {
+                const textElement = document.createElement('div');
+                textElement.className = 'message-text';
+                textElement.innerText = part.text.trim();
+                messageElement.appendChild(textElement);
+            }
+
+            if (part.local_media) {
+                const media = part.local_media;
+                let mediaElement;
+
+                if (media.mime_type.startsWith('image/')) {
+                    mediaElement = document.createElement('img');
+                    mediaElement.src = media.uri;
+                    mediaElement.className = 'img-fluid rounded'; // Bootstrap class
+                } else if (media.mime_type.startsWith('video/')) {
+                    mediaElement = document.createElement('video');
+                    mediaElement.src = media.uri;
+                    mediaElement.controls = true;
+                    mediaElement.className = 'w-100 rounded';
+                } else if (media.mime_type.startsWith('audio/')) {
+                    mediaElement = document.createElement('audio');
+                    mediaElement.src = media.uri;
+                    mediaElement.controls = true;
+                    mediaElement.className = 'w-100';
+                } else if (media.uri) { // Fallback for other file types like PDF
+                    mediaElement = document.createElement('a');
+                    mediaElement.href = media.uri;
+                    mediaElement.textContent = `Download File (${media.mime_type})`;
+                    mediaElement.target = '_blank';
+                }
+
+                if (mediaElement) {
+                    const mediaContainer = document.createElement('div');
+                    mediaContainer.className = 'media-container mt-2';
+                    mediaContainer.appendChild(mediaElement);
+                    messageElement.appendChild(mediaContainer);
+                }
+            }
+        });
+
+        messageContainer.appendChild(messageElement);
         chatWindow.appendChild(messageContainer);
     }
 

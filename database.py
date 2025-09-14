@@ -1,7 +1,7 @@
 import logging
 import json
 import aiomysql
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 from google.genai import types
 
 from utils import content_to_dict, _create_parts_from_dict
@@ -34,15 +34,14 @@ async def execute_sql_query(db_pool, sql_query: str, params: Optional[tuple] = N
         logging.exception(f"An unexpected error occurred: {e}")
         raise DatabaseError(f"An unexpected error occurred: {e}")
 
-async def save_chat_to_db(db_pool, chat_id: str, user: types.Content, bot: types.Content):
-    """Fungsi untuk menyimpan chat ke database."""
+async def save_chat_to_db(db_pool, chat_id: str, user_dict: Dict, bot_content: types.Content):
+    """Fungsi untuk menyimpan chat ke database menggunakan dictionary untuk user."""
     try:
-       user_json = json.dumps(content_to_dict(user))
-       bot_json = json.dumps(content_to_dict(bot))
+       user_json = json.dumps(user_dict)
+       bot_json = json.dumps(content_to_dict(bot_content))
 
        async with db_pool.acquire() as conn:
             async with conn.cursor() as cursor:
-               # Insert chat baru
                 query = "INSERT INTO chat_history (chat_id, user, bot) VALUES (%s, %s, %s)"
                 await cursor.execute(query, (chat_id, user_json, bot_json))
                 await conn.commit()
@@ -68,7 +67,6 @@ async def get_chat_history_from_db(db_pool, chat_id: str) -> Optional[List[types
         
         contents = []
         for row in results:
-            # Skip rows where user or bot might be null (e.g. admin messages)
             if not row['user'] or not row['bot']:
                 continue
             user_content = json.loads(row['user'])
@@ -102,6 +100,31 @@ async def delete_chat_history_from_db(db_pool, chat_id: str):
     except Exception as e:
         logging.exception(f"An unexpected error occurred while deleting chat history: {e}")
         raise DatabaseError(f"An unexpected error occurred while deleting chat history: {e}")
+
+async def get_all_media_uris_for_chat(db_pool, chat_id: str) -> List[str]:
+    """Fetches all local media URIs for a given chat_id before deletion."""
+    uris = []
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                query = "SELECT user FROM chat_history WHERE chat_id = %s"
+                await cursor.execute(query, (chat_id,))
+                results = await cursor.fetchall()
+        
+        for row in results:
+            if not row['user']:
+                continue
+            try:
+                user_message = json.loads(row['user'])
+                for part in user_message.get('parts', []):
+                    if 'local_media' in part and 'uri' in part['local_media']:
+                        uris.append(part['local_media']['uri'])
+            except (json.JSONDecodeError, KeyError) as e:
+                logging.warning(f"Could not parse media URI from user message: {e}")
+        return uris
+    except aiomysql.Error as err:
+        logging.error(f"Error fetching media URIs for chat: {err}")
+        raise DatabaseError(f"Error fetching media URIs for chat: {err}")
 
 async def get_all_chat_ids(db_pool) -> Optional[List[str]]:
     """Fungsi untuk mengambil semua chat_id unik dari database."""
@@ -167,7 +190,6 @@ async def set_control_status(db_pool, chat_id: str, status: str):
 async def save_admin_reply(db_pool, chat_id: str, admin_text: str):
     """Menyimpan balasan dari admin ke chat history."""
     try:
-        # Pesan admin disimpan di kolom 'bot', dengan kolom 'user' menandakan aksi admin
         admin_reply_content = types.Content(role="model", parts=[types.Part.from_text(text=admin_text)])
         bot_json = json.dumps(content_to_dict(admin_reply_content))
 
@@ -180,13 +202,12 @@ async def save_admin_reply(db_pool, chat_id: str, admin_text: str):
         logging.error(f"Error saving admin reply: {err}")
         raise DatabaseError(f"Error saving admin reply: {err}")
 
-async def save_user_message_only(db_pool, chat_id: str, user_content: types.Content):
-    """Menyimpan pesan dari user saja, saat admin sedang mengontrol."""
+async def save_user_message_only(db_pool, chat_id: str, user_message_dict: Dict):
+    """Menyimpan pesan dari user saja (dalam bentuk dict), saat admin sedang mengontrol."""
     try:
-        user_json = json.dumps(content_to_dict(user_content))
+        user_json = json.dumps(user_message_dict)
         async with db_pool.acquire() as conn:
             async with conn.cursor() as cursor:
-                # Hanya user yang diisi, bot diisi NULL
                 query = "INSERT INTO chat_history (chat_id, user, bot) VALUES (%s, %s, NULL)"
                 await cursor.execute(query, (chat_id, user_json))
                 await conn.commit()

@@ -2,7 +2,14 @@ import logging
 import os
 import tempfile
 import aiohttp
+import uuid
+import pathlib
+import asyncio
 from typing import Dict, Optional, Tuple
+
+# Define base directory
+BASE_DIR = pathlib.Path(__file__).parent
+MEDIA_DIR = BASE_DIR / 'static' / 'media'
 
 async def send_whatsapp_message(recipient_number: str, text: str, config: Dict, media_url: Optional[str] = None, mime_type: Optional[str] = None):
     """Function to send a WhatsApp message."""
@@ -37,15 +44,19 @@ async def send_whatsapp_message(recipient_number: str, text: str, config: Dict, 
         except aiohttp.ClientError as e:
            logging.error(f"Error sending WhatsApp message: {e}")
 
-async def _process_media(message_data: Dict, client, config: Dict) -> Optional[Tuple[Optional[str], Optional[str]]]:
-    """Helper function to process media files from WhatsApp."""
+async def _process_media(message_data: Dict, client, config: Dict) -> Optional[Tuple[Optional[str], Optional[str], Optional[str]]]:
+    """
+    Helper function to process media files from WhatsApp.
+    Saves the media locally for the UI and uploads it to Google for the model.
+    Returns a tuple of (google_uri, local_uri, mime_type).
+    """
     media_type = message_data.get('type')
     if not media_type or media_type not in ["image", "video", "audio", "document"]:
-         return None, None
+         return None, None, None
 
     media_id = message_data.get(media_type, {}).get('id')
     if not media_id:
-         return None, None
+         return None, None, None
 
     headers = {
       "Authorization": f"Bearer {config['WHATSAPP_BEARER_TOKEN']}",
@@ -59,38 +70,49 @@ async def _process_media(message_data: Dict, client, config: Dict) -> Optional[T
             media_info = await response.json()
             media_url = media_info.get("url")
             mime_type = media_info.get("mime_type")
-            ext_name = ''
-            if mime_type == 'image/jpeg':
-                ext_name = 'jpg'
-            elif mime_type == 'image/png':
-                ext_name = 'png'
-            elif mime_type == 'image/gif':
-                ext_name = 'gif'
-            elif mime_type == 'video/mp4':
-                ext_name = 'mp4'
-            elif mime_type == 'audio/mpeg':
-                ext_name = 'mp3'
-            elif mime_type == 'audio/ogg':
-                ext_name = 'ogg'
-            elif mime_type == 'application/pdf':
-                ext_name = 'pdf'
-            elif mime_type == 'text/plain':
-                ext_name = 'txt'
-            if media_url:
-                async with session.get(media_url, headers=headers) as media_response:
-                    media_response.raise_for_status()
-                    file_bytes = await media_response.read()
-                    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext_name}")
-                    temp_file.write(file_bytes)
-                    temp_file.close()
-                    file_upload = client.files.upload(file=temp_file.name)
-                    os.remove(temp_file.name)
-                    while file_upload.state != "ACTIVE":
-                        await asyncio.sleep(1)
-                        file_upload = client.files.get(name=file_upload.name)
-                    return file_upload.uri, mime_type
-            else:
-                return None, None
+            
+            if not media_url or not mime_type:
+                return None, None, None
+
+            # Determine file extension
+            ext_map = {
+                'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif',
+                'video/mp4': 'mp4', 'audio/mpeg': 'mp3', 'audio/ogg': 'ogg',
+                'application/pdf': 'pdf', 'text/plain': 'txt'
+            }
+            ext_name = ext_map.get(mime_type, 'bin') # Default to .bin for unknown types
+
+            # Download media content
+            async with session.get(media_url, headers=headers) as media_response:
+                media_response.raise_for_status()
+                file_bytes = await media_response.read()
+
+            # 1. Save locally for UI access
+            local_filename = f"{uuid.uuid4()}.{ext_name}"
+            local_path = MEDIA_DIR / local_filename
+            with open(local_path, 'wb') as f:
+                f.write(file_bytes)
+            local_uri = f"/static/media/{local_filename}"
+            logging.info(f"Media saved locally to {local_path}")
+
+            # 2. Upload to Google for AI processing
+            google_uri = None
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext_name}") as temp_file:
+                temp_file.write(file_bytes)
+                temp_file_path = temp_file.name
+            
+            try:
+                file_upload = client.files.upload(file=temp_file_path)
+                while file_upload.state != "ACTIVE":
+                    await asyncio.sleep(1)
+                    file_upload = client.files.get(name=file_upload.name)
+                google_uri = file_upload.uri
+                logging.info(f"Media uploaded to Google with URI: {google_uri}")
+            finally:
+                os.remove(temp_file_path)
+
+            return google_uri, local_uri, mime_type
+
       except aiohttp.ClientError as e:
           logging.error(f"Error fetching WhatsApp media: {e}")
-          return None, None
+          return None, None, None
