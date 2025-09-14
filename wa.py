@@ -28,7 +28,7 @@ BASE_DIR = pathlib.Path(__file__).parent
 TEMPLATES_DIR = BASE_DIR / 'templates'
 
 # --- Logika Inti Bot ---
-async def generate_gemini_response(content: types.Content, chat_id: str, chat_history: Optional[List[types.Content]] = None):
+async def generate_gemini_response(content: types.Content, chat_id: str, app: web.Application, chat_history: Optional[List[types.Content]] = None):
     """Generates a Gemini response with optional chat history."""
     global db_pool
     try:
@@ -58,6 +58,20 @@ async def generate_gemini_response(content: types.Content, chat_id: str, chat_hi
         
         await database.save_chat_to_db(db_pool, chat_id, content, response.candidates[0].content)
         
+        # Broadcast the bot message to the UI
+        bot_message_broadcast = {
+            'type': 'new_message',
+            'data': {
+                'chat_id': chat_id,
+                'message': {
+                    'user': None,
+                    'bot': content_to_dict(response.candidates[0].content)
+                }
+            }
+        }
+        for ws in app['websockets']:
+            await ws.send_json(bot_message_broadcast)
+
         if response_text:
             await whatsapp_service.send_whatsapp_message(chat_id, response_text, vars(config))
         
@@ -68,7 +82,7 @@ async def generate_gemini_response(content: types.Content, chat_id: str, chat_hi
                 function_response_parts.append(fc_res)
              
              fc_content = types.Content(role="tool", parts=function_response_parts)
-             await generate_gemini_response(fc_content, chat_id, chat_history=contents + [response.candidates[0].content])
+             await generate_gemini_response(fc_content, chat_id, app, chat_history=contents + [response.candidates[0].content])
 
     except Exception as e:
         logging.exception("Error generating Gemini response:")
@@ -130,9 +144,23 @@ async def handle_whatsapp_message(message_data: dict, app: web.Application):
             for ws in app['websockets']:
                 await ws.send_json(message_to_broadcast)
         elif control_status == 'bot':
-            logging.info(f"Chat for {recipient_number} is bot-controlled. Generating AI response.")
+            logging.info(f"Chat for {recipient_number} is bot-controlled. Notifying UI and generating AI response.")
+            # First, notify the UI about the user's message for real-time update
+            message_to_broadcast = {
+                'type': 'new_message',
+                'data': {
+                    'chat_id': recipient_number,
+                    'message': {
+                        'user': content_to_dict(content),
+                        'bot': None
+                    }
+                }
+            }
+            for ws in app['websockets']:
+                await ws.send_json(message_to_broadcast)
+
             chat_history = await database.get_chat_history_from_db(db_pool, recipient_number)
-            await generate_gemini_response(content, recipient_number, chat_history)
+            await generate_gemini_response(content, recipient_number, app, chat_history)
 
         if is_new_conversation:
             new_conversation_broadcast = {
