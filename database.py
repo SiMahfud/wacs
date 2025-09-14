@@ -168,7 +168,7 @@ async def save_admin_reply(db_pool, chat_id: str, admin_text: str):
     """Menyimpan balasan dari admin ke chat history."""
     try:
         # Pesan admin disimpan di kolom 'bot', dengan kolom 'user' menandakan aksi admin
-        admin_reply_content = types.Content(role="model", parts=[types.Part.from_text(admin_text)])
+        admin_reply_content = types.Content(role="model", parts=[types.Part.from_text(text=admin_text)])
         bot_json = json.dumps(content_to_dict(admin_reply_content))
 
         async with db_pool.acquire() as conn:
