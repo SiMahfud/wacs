@@ -28,7 +28,7 @@ BASE_DIR = pathlib.Path(__file__).parent
 TEMPLATES_DIR = BASE_DIR / 'templates'
 
 # --- Logika Inti Bot ---
-async def generate_gemini_response(content: types.Content, chat_id: int, chat_history: Optional[List[types.Content]] = None):
+async def generate_gemini_response(content: types.Content, chat_id: str, chat_history: Optional[List[types.Content]] = None):
     """Generates a Gemini response with optional chat history."""
     global db_pool
     try:
@@ -111,24 +111,38 @@ async def handle_whatsapp_message(message_data: dict, app: web.Application):
 
         content = types.Content(role="user", parts=parts)
 
+        # Check if this is a new conversation
+        is_new_conversation = not await database.chat_exists(db_pool, recipient_number)
+
         if control_status == 'admin':
             logging.info(f"Chat for {recipient_number} is admin-controlled. Storing message and notifying UI.")
             await database.save_user_message_only(db_pool, recipient_number, content)
             message_to_broadcast = {
                 'type': 'new_message',
                 'data': {
-                    'user': content_to_dict(content),
-                    'bot': None
+                    'chat_id': recipient_number,
+                    'message': {
+                        'user': content_to_dict(content),
+                        'bot': None
+                    }
                 }
             }
-            for ws in app['websockets'].get(recipient_number, []):
+            for ws in app['websockets']:
                 await ws.send_json(message_to_broadcast)
-            return
-
         elif control_status == 'bot':
             logging.info(f"Chat for {recipient_number} is bot-controlled. Generating AI response.")
             chat_history = await database.get_chat_history_from_db(db_pool, recipient_number)
             await generate_gemini_response(content, recipient_number, chat_history)
+
+        if is_new_conversation:
+            new_conversation_broadcast = {
+                'type': 'new_conversation',
+                'data': {
+                    'chat_id': recipient_number
+                }
+            }
+            for ws in app['websockets']:
+                await ws.send_json(new_conversation_broadcast)
 
     except Exception as e:
         logging.exception("Error processing message:")
@@ -216,11 +230,14 @@ async def admin_reply_handler(request):
         message_to_broadcast = {
             'type': 'new_message',
             'data': {
-                'user': None,
-                'bot': {'role': 'admin', 'parts': [{'text': text}]}
+                'chat_id': chat_id,
+                'message': {
+                    'user': None,
+                    'bot': {'role': 'admin', 'parts': [{'text': text}]}
+                }
             }
         }
-        for ws in request.app['websockets'].get(chat_id, []):
+        for ws in request.app['websockets']:
             await ws.send_json(message_to_broadcast)
             
         return web.json_response({'success': True})
@@ -228,27 +245,21 @@ async def admin_reply_handler(request):
         logging.error(f"Error sending admin reply: {e}")
         return web.json_response({'error': 'Failed to send message'}, status=500)
 
-async def websocket_handler(request):
+async def global_websocket_handler(request):
     ws = web.WebSocketResponse()
     await ws.prepare(request)
     
-    chat_id = request.query.get('chat_id')
-    if not chat_id:
-        await ws.close(code=1008, message=b'Chat ID not provided')
-        return ws
-
-    request.app['websockets'][chat_id].append(ws)
-    logging.info(f"WebSocket connection established for chat_id: {chat_id}")
+    request.app['websockets'].append(ws)
+    logging.info("Global WebSocket connection established.")
 
     try:
         async for msg in ws:
             pass
     except Exception as e:
-        logging.error(f"WebSocket error: {e}")
+        logging.error(f"Global WebSocket error: {e}")
     finally:
-        if ws in request.app['websockets'][chat_id]:
-            request.app['websockets'][chat_id].remove(ws)
-        logging.info(f"WebSocket connection closed for chat_id: {chat_id}")
+        request.app['websockets'].remove(ws)
+        logging.info("Global WebSocket connection closed.")
 
     return ws
 
@@ -260,7 +271,7 @@ async def main():
     )
     
     app = web.Application()
-    app['websockets'] = defaultdict(list)
+    app['websockets'] = []
 
     app.add_routes([
         web.get('/whatsapp/webhook', whatsapp_webhook_handler),
@@ -271,7 +282,7 @@ async def main():
         web.get('/api/conversations/{chat_id}/control', get_control_status_handler),
         web.post('/api/conversations/{chat_id}/control', set_control_status_handler),
         web.post('/api/conversations/{chat_id}/reply', admin_reply_handler),
-        web.get('/ws', websocket_handler),
+        web.get('/ws/all', global_websocket_handler),
     ])
 
     app.router.add_static('/static/', path=str(BASE_DIR / 'static'), name='static')

@@ -1,5 +1,4 @@
 document.addEventListener('DOMContentLoaded', function() {
-    // DOM Elements
     const conversationsList = document.getElementById('conversations-list');
     const chatWindow = document.getElementById('chat-window');
     const chatHeader = document.getElementById('chat-header');
@@ -10,46 +9,127 @@ document.addEventListener('DOMContentLoaded', function() {
     const replyForm = document.getElementById('reply-form');
     const replyInput = document.getElementById('reply-input');
 
-    // Global State
     let activeChatId = null;
-    let currentWs = null;
+    let globalWs = null;
 
-    // Fetch initial conversations
-    fetch('/api/conversations')
-        .then(response => response.json())
-        .then(chatIds => {
-            if (chatIds.length === 0) {
-                conversationsList.innerHTML = '<p class="p-3 text-muted">No conversations found.</p>';
-                return;
+    function setupGlobalWebSocket() {
+        const wsUrl = `ws://${window.location.host}/ws/all`;
+        globalWs = new WebSocket(wsUrl);
+
+        globalWs.onmessage = function(event) {
+            const message = JSON.parse(event.data);
+            
+            if (message.type === 'new_message') {
+                handleNewMessage(message.data);
+            } else if (message.type === 'new_conversation') {
+                addConversationToList(message.data.chat_id, true);
             }
-            chatIds.forEach(chatId => {
-                const listItem = document.createElement('a');
-                listItem.href = '#';
-                listItem.className = 'list-group-item list-group-item-action';
-                listItem.textContent = chatId;
-                listItem.dataset.chatId = chatId;
-                conversationsList.appendChild(listItem);
+        };
+
+        globalWs.onclose = function() {
+            console.log('Global WebSocket connection closed. Reconnecting...');
+            setTimeout(setupGlobalWebSocket, 3000); // Reconnect after 3 seconds
+        };
+
+        globalWs.onerror = function(error) {
+            console.error('Global WebSocket error:', error);
+            globalWs.close(); // This will trigger the onclose handler to reconnect
+        };
+    }
+
+    function handleNewMessage(data) {
+        const { chat_id, message } = data;
+        
+        // If it's for the active chat, render it
+        if (chat_id === activeChatId) {
+            renderMessage(message);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+        
+        // Update the conversation list (e.g., bold, move to top)
+        updateConversationPreview(chat_id, message);
+    }
+
+    function updateConversationPreview(chatId, message) {
+        let listItem = conversationsList.querySelector(`[data-chat-id="${chatId}"]`);
+        
+        if (!listItem) {
+            // If the conversation is not in the list, add it
+            addConversationToList(chatId, true);
+            listItem = conversationsList.querySelector(`[data-chat-id="${chatId}"]`);
+        }
+
+        // Add a visual indicator for a new message, but not if it's the active chat
+        if (chatId !== activeChatId) {
+            listItem.classList.add('font-weight-bold', 'text-primary');
+        }
+
+        // Move to the top of the list, only if it's not already there
+        if (conversationsList.firstChild !== listItem) {
+            conversationsList.prepend(listItem);
+        }
+    }
+    
+    function addConversationToList(chatId, isNew = false) {
+        // Avoid adding duplicates
+        let existingItem = conversationsList.querySelector(`[data-chat-id="${chatId}"]`);
+        if (existingItem) {
+            // If the item already exists, just move it to the top.
+            conversationsList.prepend(existingItem);
+            return;
+        }
+
+        const listItem = document.createElement('a');
+        listItem.href = '#';
+        listItem.className = 'list-group-item list-group-item-action';
+        listItem.textContent = chatId;
+        listItem.dataset.chatId = chatId;
+
+        if (isNew) {
+            listItem.classList.add('font-weight-bold', 'text-primary');
+        }
+
+        // Remove placeholder if it exists
+        const placeholder = conversationsList.querySelector('.text-muted');
+        if (placeholder) {
+            placeholder.remove();
+        }
+        
+        conversationsList.prepend(listItem);
+    }
+
+
+    function fetchInitialConversations() {
+        fetch('/api/conversations')
+            .then(response => response.json())
+            .then(chatIds => {
+                if (chatIds.length === 0) {
+                    conversationsList.innerHTML = '<p class="p-3 text-muted">No conversations found.</p>';
+                    return;
+                }
+                chatIds.forEach(chatId => addConversationToList(chatId));
             });
-        });
+    }
 
-    // --- Event Listeners ---
-
-    // Select a conversation
     conversationsList.addEventListener('click', function(e) {
         if (e.target && e.target.matches('a.list-group-item')) {
             e.preventDefault();
             const chatId = e.target.dataset.chatId;
-            if (chatId === activeChatId) return; // Don't reload if already active
+
+            // If the clicked chat is already active, do nothing.
+            if (chatId === activeChatId) return;
 
             const currentActive = conversationsList.querySelector('.active');
             if (currentActive) currentActive.classList.remove('active');
             e.target.classList.add('active');
             
+            // Remove new message indicator when clicked
+            e.target.classList.remove('font-weight-bold', 'text-primary');
+
             loadConversation(chatId);
         }
     });
 
-    // Toggle control between bot and admin
     controlButton.addEventListener('click', function() {
         const currentStatus = controlButton.dataset.status;
         const newStatus = currentStatus === 'bot' ? 'admin' : 'bot';
@@ -67,7 +147,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // Handle admin reply
     replyForm.addEventListener('submit', function(e) {
         e.preventDefault();
         const text = replyInput.value.trim();
@@ -81,16 +160,12 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                replyInput.value = ''; // Clear input on successful send
+                replyInput.value = '';
             } else {
-                // Optionally, show an error to the admin
                 console.error("Failed to send reply:", data.error);
             }
         });
     });
-
-
-    // --- Core Functions ---
 
     function loadConversation(chatId) {
         activeChatId = chatId;
@@ -99,12 +174,6 @@ document.addEventListener('DOMContentLoaded', function() {
         controlContainer.style.display = 'block';
         chatWindow.innerHTML = '<div class="d-flex justify-content-center align-items-center h-100"><div class="spinner-border text-success" role="status"></div></div>';
 
-        // Close previous WebSocket connection if it exists
-        if (currentWs) {
-            currentWs.close();
-        }
-
-        // Fetch history and control status concurrently
         Promise.all([
             fetch(`/api/conversations/${chatId}`),
             fetch(`/api/conversations/${chatId}/control`)
@@ -114,11 +183,7 @@ document.addEventListener('DOMContentLoaded', function() {
             chatWindow.innerHTML = '';
             history.forEach(item => renderMessage(item));
             chatWindow.scrollTop = chatWindow.scrollHeight;
-
             updateControlUI(controlStatus.controlled_by);
-            
-            // Establish new WebSocket connection
-            setupWebSocket(chatId);
         })
         .catch(error => {
             console.error('Error loading conversation:', error);
@@ -141,30 +206,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    function setupWebSocket(chatId) {
-        const wsUrl = `ws://${window.location.host}/ws?chat_id=${chatId}`;
-        currentWs = new WebSocket(wsUrl);
-
-        currentWs.onmessage = function(event) {
-            const message = JSON.parse(event.data);
-            if (message.type === 'new_message') {
-                renderMessage(message.data);
-                chatWindow.scrollTop = chatWindow.scrollHeight;
-            }
-        };
-
-        currentWs.onclose = function() {
-            console.log('WebSocket connection closed');
-        };
-
-        currentWs.onerror = function(error) {
-            console.error('WebSocket error:', error);
-        };
-    }
-
     function renderMessage(item) {
         if (item.user) {
-            // Don't render the placeholder user message for an admin reply
             if (item.user.parts[0].text !== '[ADMIN_REPLIED]') {
                 appendMessage(item.user, 'user-message');
             }
@@ -187,7 +230,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         const messageElement = document.createElement('div');
-        // Use 'bot-message' style for admin messages too, but could add a specific one
         const messageClass = type === 'admin-message' ? 'bot-message admin-reply' : type;
         messageElement.className = `message ${messageClass}`;
         
@@ -197,7 +239,7 @@ document.addEventListener('DOMContentLoaded', function() {
             roleElement.textContent = 'User';
         } else if (type === 'admin-message') {
             roleElement.textContent = 'Admin';
-            roleElement.style.color = '#dc3545'; // Make admin role stand out
+            roleElement.style.color = '#dc3545';
         } else {
             roleElement.textContent = 'Assistant';
         }
@@ -212,4 +254,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         chatWindow.appendChild(messageContainer);
     }
+
+    // --- Initialize ---
+    fetchInitialConversations();
+    setupGlobalWebSocket();
 });

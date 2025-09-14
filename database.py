@@ -34,7 +34,7 @@ async def execute_sql_query(db_pool, sql_query: str, params: Optional[tuple] = N
         logging.exception(f"An unexpected error occurred: {e}")
         raise DatabaseError(f"An unexpected error occurred: {e}")
 
-async def save_chat_to_db(db_pool, chat_id: int, user: types.Content, bot: types.Content):
+async def save_chat_to_db(db_pool, chat_id: str, user: types.Content, bot: types.Content):
     """Fungsi untuk menyimpan chat ke database."""
     try:
        user_json = json.dumps(content_to_dict(user))
@@ -54,7 +54,7 @@ async def save_chat_to_db(db_pool, chat_id: int, user: types.Content, bot: types
         logging.exception(f"An unexpected error occurred: {e}")
         raise DatabaseError(f"An unexpected error occurred: {e}")
 
-async def get_chat_history_from_db(db_pool, chat_id: int) -> Optional[List[types.Content]]:
+async def get_chat_history_from_db(db_pool, chat_id: str) -> Optional[List[types.Content]]:
     """Fungsi untuk mengambil riwayat chat dari database."""
     try:
         async with db_pool.acquire() as conn:
@@ -87,7 +87,7 @@ async def get_chat_history_from_db(db_pool, chat_id: int) -> Optional[List[types
         logging.exception(f"An unexpected error occurred: {e}")
         raise DatabaseError(f"An unexpected error occurred: {e}")
 
-async def delete_chat_history_from_db(db_pool, chat_id: int):
+async def delete_chat_history_from_db(db_pool, chat_id: str):
     """Fungsi untuk menghapus semua riwayat chat untuk chat_id tertentu."""
     try:
         async with db_pool.acquire() as conn:
@@ -116,7 +116,7 @@ async def get_all_chat_ids(db_pool) -> Optional[List[str]]:
         logging.error(f"Error retrieving all chat IDs: {err}")
         raise DatabaseError(f"Error retrieving all chat IDs: {err}")
 
-async def get_chat_history_for_admin(db_pool, chat_id: int) -> Optional[List[dict]]:
+async def get_chat_history_for_admin(db_pool, chat_id: str) -> Optional[List[dict]]:
     """Fungsi untuk mengambil riwayat chat dari database untuk admin UI."""
     try:
         async with db_pool.acquire() as conn:
@@ -193,3 +193,16 @@ async def save_user_message_only(db_pool, chat_id: str, user_content: types.Cont
     except aiomysql.Error as err:
         logging.error(f"Error saving user-only message: {err}")
         raise DatabaseError(f"Error saving user-only message: {err}")
+
+async def chat_exists(db_pool, chat_id: str) -> bool:
+    """Checks if a chat with the given chat_id already exists in the database."""
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                query = "SELECT 1 FROM chat_history WHERE chat_id = %s LIMIT 1"
+                await cursor.execute(query, (chat_id,))
+                result = await cursor.fetchone()
+        return result is not None
+    except aiomysql.Error as err:
+        logging.error(f"Error checking if chat exists: {err}")
+        raise DatabaseError(f"Error checking if chat exists: {err}")
