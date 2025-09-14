@@ -1,0 +1,5 @@
+aiohttp==3.12.15
+aiomysql==0.2.0
+google-genai==1.32.0
+python-dotenv==1.1.1
+PyAutoGUI==0.9.54
