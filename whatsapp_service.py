@@ -44,19 +44,21 @@ async def send_whatsapp_message(recipient_number: str, text: str, config: Dict, 
         except aiohttp.ClientError as e:
            logging.error(f"Error sending WhatsApp message: {e}")
 
-async def _process_media(message_data: Dict, client, config: Dict) -> Optional[Tuple[Optional[str], Optional[str], Optional[str]]]:
+async def _process_media(message_data: Dict, client, config: Dict) -> Optional[Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]]:
     """
     Helper function to process media files from WhatsApp.
     Saves the media locally for the UI and uploads it to Google for the model.
-    Returns a tuple of (google_uri, local_uri, mime_type).
+    Returns a tuple of (google_uri, local_uri, mime_type, filename).
     """
     media_type = message_data.get('type')
     if not media_type or media_type not in ["image", "video", "audio", "document"]:
-         return None, None, None
+         return None, None, None, None
 
-    media_id = message_data.get(media_type, {}).get('id')
+    media_content = message_data.get(media_type, {})
+    media_id = media_content.get('id')
+    filename = media_content.get('filename') # Get filename for documents
     if not media_id:
-         return None, None, None
+         return None, None, None, None
 
     headers = {
       "Authorization": f"Bearer {config['WHATSAPP_BEARER_TOKEN']}",
@@ -72,7 +74,7 @@ async def _process_media(message_data: Dict, client, config: Dict) -> Optional[T
             mime_type = media_info.get("mime_type")
             
             if not media_url or not mime_type:
-                return None, None, None
+                return None, None, None, None
 
             # Determine file extension
             ext_map = {
@@ -111,8 +113,8 @@ async def _process_media(message_data: Dict, client, config: Dict) -> Optional[T
             finally:
                 os.remove(temp_file_path)
 
-            return google_uri, local_uri, mime_type
+            return google_uri, local_uri, mime_type, filename
 
       except aiohttp.ClientError as e:
           logging.error(f"Error fetching WhatsApp media: {e}")
-          return None, None, None
+          return None, None, None, None

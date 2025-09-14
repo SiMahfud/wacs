@@ -103,6 +103,7 @@ async def handle_whatsapp_message(message_data: dict, app: web.Application):
         message_text = None
         local_uri_for_ui = None
         mime_type_for_ui = None
+        filename_for_ui = None
 
         if message_data.get('type') == 'text':
             message_text = message_data.get('text', {}).get('body')
@@ -132,10 +133,11 @@ async def handle_whatsapp_message(message_data: dict, app: web.Application):
 
         media_result = await whatsapp_service._process_media(message_data, client, vars(config))
         if media_result:
-            google_uri, local_uri, mime_type = media_result
+            google_uri, local_uri, mime_type, filename = media_result
             if google_uri and mime_type:
                 local_uri_for_ui = local_uri
                 mime_type_for_ui = mime_type
+                filename_for_ui = filename
                 media_type = message_data.get('type')
                 caption = message_data.get(media_type, {}).get('caption')
                 if caption:
@@ -154,7 +156,8 @@ async def handle_whatsapp_message(message_data: dict, app: web.Application):
             user_message_dict['parts'].append({
                 'local_media': {
                     'uri': local_uri_for_ui,
-                    'mime_type': mime_type_for_ui
+                    'mime_type': mime_type_for_ui,
+                    'filename': filename_for_ui
                 }
             })
 

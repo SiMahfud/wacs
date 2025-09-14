@@ -240,6 +240,15 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         messageElement.appendChild(roleElement);
 
+        // Helper to get a friendly name and icon for mime types
+        const getFileInfo = (mimeType) => {
+            if (mimeType.includes('pdf')) return { name: 'PDF Document', icon: 'bi-file-earmark-pdf-fill' };
+            if (mimeType.includes('text')) return { name: 'Text File', icon: 'bi-file-earmark-text-fill' };
+            if (mimeType.includes('zip')) return { name: 'ZIP Archive', icon: 'bi-file-earmark-zip-fill' };
+            if (mimeType.includes('word')) return { name: 'Word Document', icon: 'bi-file-earmark-word-fill' };
+            return { name: 'File', icon: 'bi-file-earmark-arrow-down-fill' }; // Generic fallback
+        };
+
         // Process and append parts
         messageContent.parts.forEach(part => {
             if (part.text) {
@@ -251,12 +260,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
             if (part.local_media) {
                 const media = part.local_media;
+                let mediaWrapper = document.createElement('div');
+                mediaWrapper.className = 'media-container mt-2';
                 let mediaElement;
 
                 if (media.mime_type.startsWith('image/')) {
                     mediaElement = document.createElement('img');
                     mediaElement.src = media.uri;
-                    mediaElement.className = 'img-fluid rounded'; // Bootstrap class
+                    mediaElement.className = 'img-fluid rounded';
                 } else if (media.mime_type.startsWith('video/')) {
                     mediaElement = document.createElement('video');
                     mediaElement.src = media.uri;
@@ -267,18 +278,31 @@ document.addEventListener('DOMContentLoaded', function() {
                     mediaElement.src = media.uri;
                     mediaElement.controls = true;
                     mediaElement.className = 'w-100';
-                } else if (media.uri) { // Fallback for other file types like PDF
+                } else if (media.uri) { // Fallback for documents and other files
+                    const fileInfo = getFileInfo(media.mime_type);
+                    const displayName = media.filename || fileInfo.name;
+                    const downloadName = media.filename || media.uri.split('/').pop();
+                    
                     mediaElement = document.createElement('a');
                     mediaElement.href = media.uri;
-                    mediaElement.textContent = `Download File (${media.mime_type})`;
+                    mediaElement.className = 'document-link';
+                    mediaElement.download = downloadName; // Use original or generated filename for download
                     mediaElement.target = '_blank';
+
+                    mediaElement.innerHTML = `
+                        <div class="document-display d-flex align-items-center p-2 rounded">
+                            <i class="bi ${fileInfo.icon} fs-2 me-3"></i>
+                            <div class="flex-grow-1 overflow-hidden">
+                                <div class="fw-bold text-truncate">${displayName}</div>
+                                <div class="text-muted small">${media.mime_type}</div>
+                            </div>
+                        </div>
+                    `;
                 }
 
                 if (mediaElement) {
-                    const mediaContainer = document.createElement('div');
-                    mediaContainer.className = 'media-container mt-2';
-                    mediaContainer.appendChild(mediaElement);
-                    messageElement.appendChild(mediaContainer);
+                    mediaWrapper.appendChild(mediaElement);
+                    messageElement.appendChild(mediaWrapper);
                 }
             }
         });

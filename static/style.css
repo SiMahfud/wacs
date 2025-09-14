@@ -93,3 +93,23 @@ body, html {
     font-size: 0.9rem;
     color: #111b21;
 }
+
+/* Document Download Component */
+.document-link {
+    text-decoration: none;
+    color: inherit;
+}
+
+.document-display {
+    background-color: #f7f7f7;
+    border: 1px solid #e9e9e9;
+    transition: background-color 0.2s ease;
+}
+
+.document-link:hover .document-display {
+    background-color: #e9e9e9;
+}
+
+.document-display .bi {
+    color: #5f6368;
+}
