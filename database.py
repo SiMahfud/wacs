@@ -71,9 +71,10 @@ async def get_chat_history_from_db(db_pool, chat_id: str) -> Optional[List[types
                 continue
             user_content = json.loads(row['user'])
             bot_content = json.loads(row['bot'])
-            
-            user_parts = _create_parts_from_dict(user_content['parts'])
-            bot_parts = _create_parts_from_dict(bot_content['parts'])
+
+            # Safely get 'parts' or an empty list if not present
+            user_parts = _create_parts_from_dict(user_content.get('parts', []))
+            bot_parts = _create_parts_from_dict(bot_content.get('parts', []))
             
             contents.append(types.Content(role=user_content['role'], parts=user_parts))
             contents.append(types.Content(role=bot_content['role'], parts=bot_parts))
