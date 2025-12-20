@@ -76,8 +76,8 @@ async def get_chat_history_from_db(db_pool, chat_id: str) -> Optional[List[types
             user_parts = _create_parts_from_dict(user_content.get('parts', []))
             bot_parts = _create_parts_from_dict(bot_content.get('parts', []))
             
-            contents.append(types.Content(role=user_content['role'], parts=user_parts))
-            contents.append(types.Content(role=bot_content['role'], parts=bot_parts))
+            contents.append(types.Content(role=user_content.get('role', 'user'), parts=user_parts))
+            contents.append(types.Content(role=bot_content.get('role', 'model'), parts=bot_parts))
         return contents
     except aiomysql.Error as err:
         logging.error(f"Error retrieving chat history from database: {err}")
