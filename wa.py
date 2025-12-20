@@ -176,9 +176,9 @@ async def handle_whatsapp_message(message_data: dict, app: web.Application):
 
         if control_status == 'admin':
             logging.info(f"Chat for {recipient_number} is admin-controlled. Storing message and notifying UI.")
-            await database.save_user_message_only(db_pool, recipient_number, user_message_dict)
             for ws in app['websockets']:
                 await ws.send_json(message_to_broadcast)
+            await database.save_user_message_only(db_pool, recipient_number, user_message_dict)
         elif control_status == 'bot':
             logging.info(f"Chat for {recipient_number} is bot-controlled. Notifying UI and generating AI response.")
             for ws in app['websockets']:
@@ -316,6 +316,61 @@ async def global_websocket_handler(request):
 
     return ws
 
+
+
+async def generate_chat_summary(db_pool, chat_id, client):
+    """Generates a summary of the chat using Gemini."""
+    history = await database.get_chat_history_from_db(db_pool, chat_id)
+    if not history:
+        return "No chat history found."
+    
+    prompt = "Please summarize the following conversation between a user and an AI assistant. Focus on the user's main intent and the outcome."
+    contents = [types.Content(role='user', parts=[types.Part.from_text(text=prompt)])] + history
+    
+    try:
+        response = client.models.generate_content(
+            model=config.GOOGLE_MODEL,
+            contents=contents,
+            config=GenerateContentConfig(temperature=0.5, max_output_tokens=1000)
+        )
+        return response.text
+    except Exception as e:
+        logging.error(f"Error generating summary: {e}")
+        return "Error generating summary."
+
+async def get_stats_handler(request):
+    global db_pool
+    try:
+        chat_ids = await database.get_all_chat_ids(db_pool)
+        active_chats = len(chat_ids)
+        
+        # Calculate uptime
+        start_time = request.app.get('start_time')
+        uptime_seconds = asyncio.get_event_loop().time() - start_time if start_time else 0
+        
+        # Format uptime
+        days, remainder = divmod(uptime_seconds, 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        uptime_str = f"{int(days)}d {int(hours)}h {int(minutes)}m"
+
+        return web.json_response({
+            'active_chats': active_chats,
+            'uptime': uptime_str,
+            'model': config.GOOGLE_MODEL
+        })
+    except Exception as e:
+        return web.json_response({'error': str(e)}, status=500)
+
+async def generate_summary_handler(request):
+    global db_pool
+    chat_id = request.match_info.get('chat_id')
+    try:
+         summary = await generate_chat_summary(db_pool, chat_id, client)
+         return web.json_response({'summary': summary})
+    except Exception as e:
+        return web.json_response({'error': str(e)}, status=500)
+
 async def main():
     global db_pool
     db_pool = await aiomysql.create_pool(
@@ -335,6 +390,8 @@ async def main():
         web.get('/api/conversations/{chat_id}/control', get_control_status_handler),
         web.post('/api/conversations/{chat_id}/control', set_control_status_handler),
         web.post('/api/conversations/{chat_id}/reply', admin_reply_handler),
+        web.get('/api/conversations/{chat_id}/summarize', generate_summary_handler),
+        web.get('/api/stats', get_stats_handler),
         web.get('/ws/all', global_websocket_handler),
     ])
 
@@ -348,6 +405,8 @@ async def main():
     logging.info("Server started, listening on http://localhost:8123")
     logging.info("Admin UI available at http://localhost:8123/admin")
     
+    app['start_time'] = asyncio.get_event_loop().time()
+
     try:
        while True:
             await asyncio.sleep(3600)

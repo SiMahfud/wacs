@@ -1,317 +1,329 @@
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
+    // Elements
     const conversationsList = document.getElementById('conversations-list');
+    const searchInput = document.getElementById('search-input');
+
     const chatWindow = document.getElementById('chat-window');
-    const chatHeader = document.getElementById('chat-header');
-    const chatPlaceholder = document.getElementById('chat-placeholder');
-    const controlContainer = document.getElementById('control-container');
-    const controlButton = document.getElementById('control-button');
-    const replyFormContainer = document.getElementById('reply-form-container');
+    const chatTitle = document.getElementById('chat-title');
+    const chatStatus = document.getElementById('chat-status');
+    const controlPanel = document.getElementById('control-panel');
+    const controlToggle = document.getElementById('control-toggle');
+
+    const inputArea = document.getElementById('input-area');
     const replyForm = document.getElementById('reply-form');
     const replyInput = document.getElementById('reply-input');
+    const btnSummarize = document.getElementById('btn-attal');
+
+    // Stats Elements
+    const statModel = document.getElementById('stat-model');
+    const statActiveChats = document.getElementById('stat-active-chats');
+    const statUptime = document.getElementById('stat-uptime');
+    const summaryCard = document.getElementById('summary-card');
+    const summaryText = document.getElementById('chat-summary-text');
 
     let activeChatId = null;
+    let allChatIds = []; // Store for searching
     let globalWs = null;
 
-    function setupGlobalWebSocket() {
-        const wsUrl = `ws://${window.location.host}/ws/all`;
-        globalWs = new WebSocket(wsUrl);
+    // --- Initialization ---
+    fetchStats();
+    fetchInitialConversations();
+    setupGlobalWebSocket();
+    setInterval(fetchStats, 60000); // Refresh stats every minute
 
-        globalWs.onmessage = function(event) {
-            const message = JSON.parse(event.data);
-            
-            if (message.type === 'new_message') {
-                handleNewMessage(message.data);
-            } else if (message.type === 'new_conversation') {
-                addConversationToList(message.data.chat_id, true);
-            }
-        };
+    // --- Search Logic ---
+    searchInput.addEventListener('input', (e) => {
+        const query = e.target.value.toLowerCase();
+        const filtered = allChatIds.filter(id => id.toLowerCase().includes(query));
+        renderConversationList(filtered);
+    });
 
-        globalWs.onclose = function() {
-            console.log('Global WebSocket connection closed. Reconnecting...');
-            setTimeout(setupGlobalWebSocket, 3000); // Reconnect after 3 seconds
-        };
-
-        globalWs.onerror = function(error) {
-            console.error('Global WebSocket error:', error);
-            globalWs.close(); // This will trigger the onclose handler to reconnect
-        };
+    // --- Stats Logic ---
+    function fetchStats() {
+        fetch('/api/stats')
+            .then(res => res.json())
+            .then(data => {
+                if (data.active_chats !== undefined) {
+                    statActiveChats.textContent = data.active_chats;
+                    statUptime.textContent = data.uptime;
+                    statModel.textContent = data.model;
+                }
+            })
+            .catch(console.error);
     }
 
-    function handleNewMessage(data) {
-        const { chat_id, message } = data;
-        
-        // If it's for the active chat, render it
-        if (chat_id === activeChatId) {
-            renderMessage(message);
-            chatWindow.scrollTop = chatWindow.scrollHeight;
-        }
-        
-        // Update the conversation list (e.g., bold, move to top)
-        updateConversationPreview(chat_id, message);
-    }
-
-    function updateConversationPreview(chatId, message) {
-        let listItem = conversationsList.querySelector(`[data-chat-id="${chatId}"]`);
-        
-        if (!listItem) {
-            // If the conversation is not in the list, add it
-            addConversationToList(chatId, true);
-            listItem = conversationsList.querySelector(`[data-chat-id="${chatId}"]`);
-        }
-
-        // Add a visual indicator for a new message, but not if it's the active chat
-        if (chatId !== activeChatId) {
-            listItem.classList.add('font-weight-bold', 'text-primary');
-        }
-
-        // Move to the top of the list, only if it's not already there
-        if (conversationsList.firstChild !== listItem) {
-            conversationsList.prepend(listItem);
-        }
-    }
-    
-    function addConversationToList(chatId, isNew = false) {
-        // Avoid adding duplicates
-        let existingItem = conversationsList.querySelector(`[data-chat-id="${chatId}"]`);
-        if (existingItem) {
-            // If the item already exists, just move it to the top.
-            conversationsList.prepend(existingItem);
-            return;
-        }
-
-        const listItem = document.createElement('a');
-        listItem.href = '#';
-        listItem.className = 'list-group-item list-group-item-action';
-        listItem.textContent = chatId;
-        listItem.dataset.chatId = chatId;
-
-        if (isNew) {
-            listItem.classList.add('font-weight-bold', 'text-primary');
-        }
-
-        // Remove placeholder if it exists
-        const placeholder = conversationsList.querySelector('.text-muted');
-        if (placeholder) {
-            placeholder.remove();
-        }
-        
-        conversationsList.prepend(listItem);
-    }
-
-
+    // --- Conversation List Logic ---
     function fetchInitialConversations() {
         fetch('/api/conversations')
             .then(response => response.json())
             .then(chatIds => {
-                if (chatIds.length === 0) {
-                    conversationsList.innerHTML = '<p class="p-3 text-muted">No conversations found.</p>';
-                    return;
-                }
-                chatIds.forEach(chatId => addConversationToList(chatId));
+                allChatIds = chatIds;
+                renderConversationList(allChatIds);
             });
     }
 
-    conversationsList.addEventListener('click', function(e) {
-        if (e.target && e.target.matches('a.list-group-item')) {
-            e.preventDefault();
-            const chatId = e.target.dataset.chatId;
-
-            // If the clicked chat is already active, do nothing.
-            if (chatId === activeChatId) return;
-
-            const currentActive = conversationsList.querySelector('.active');
-            if (currentActive) currentActive.classList.remove('active');
-            e.target.classList.add('active');
-            
-            // Remove new message indicator when clicked
-            e.target.classList.remove('font-weight-bold', 'text-primary');
-
-            loadConversation(chatId);
+    function renderConversationList(ids) {
+        conversationsList.innerHTML = '';
+        if (ids.length === 0) {
+            conversationsList.innerHTML = '<div style="padding: 20px; color: var(--text-secondary); text-align: center;">No chats found</div>';
+            return;
         }
-    });
 
-    controlButton.addEventListener('click', function() {
-        const currentStatus = controlButton.dataset.status;
-        const newStatus = currentStatus === 'bot' ? 'admin' : 'bot';
+        ids.forEach(id => {
+            const el = document.createElement('div');
+            el.className = `conversation-item ${id === activeChatId ? 'active' : ''}`;
+            el.dataset.chatId = id;
+            el.innerHTML = `
+                <div class="d-flex align-items-center">
+                    <i class="bi bi-person-circle fs-4 me-3" style="color: var(--text-secondary);"></i>
+                    <span style="font-weight: 500;">${id}</span>
+                </div>
+            `;
+            el.addEventListener('click', () => loadConversation(id));
+            conversationsList.appendChild(el);
+        });
+    }
+
+    function updateConversationList(chatId) {
+        if (!allChatIds.includes(chatId)) {
+            allChatIds.unshift(chatId);
+            renderConversationList(allChatIds);
+        }
+    }
+
+    // --- Chat Loading Logic ---
+    function loadConversation(chatId) {
+        activeChatId = chatId;
+
+        // Update UI Text
+        chatTitle.textContent = chatId;
+        chatStatus.textContent = "Loading history...";
+
+        // Update selection visual
+        document.querySelectorAll('.conversation-item').forEach(el => {
+            el.classList.toggle('active', el.dataset.chatId === chatId);
+            if (el.dataset.chatId === chatId) {
+                // Remove badge if exists
+                const badge = el.querySelector('.chat-badge');
+                if (badge) badge.remove();
+            }
+        });
+
+        // Show controls
+        controlPanel.style.display = 'flex';
+        inputArea.style.display = 'none'; // Hidden until we know status
+        summaryCard.style.display = 'none'; // Hide summary on new chat load
+
+        chatWindow.innerHTML = '<div class="d-flex justify-content-center align-items-center h-100"><div class="spinner-border text-primary" role="status"></div></div>';
+
+        Promise.all([
+            fetch(`/api/conversations/${chatId}`),
+            fetch(`/api/conversations/${chatId}/control`)
+        ])
+            .then(responses => Promise.all(responses.map(res => res.json())))
+            .then(([history, controlStatus]) => {
+                chatWindow.innerHTML = '';
+
+                if (Array.isArray(history)) {
+                    history.forEach(item => renderMessage(item));
+                } else {
+                    chatWindow.innerHTML = '<div style="text-align:center; padding: 20px;">No history provided.</div>';
+                }
+
+                chatWindow.scrollTop = chatWindow.scrollHeight;
+                updateControlUI(controlStatus.controlled_by);
+                chatStatus.textContent = controlStatus.controlled_by === 'bot' ? 'Managed by AI' : 'Manual Control';
+            })
+            .catch(error => {
+                console.error('Error loading chat:', error);
+                chatWindow.innerHTML = '<p style="color: var(--danger-color); text-align: center;">Failed to load conversation.</p>';
+            });
+    }
+
+    // --- Message Rendering with Markdown ---
+    function renderMessage(item) {
+        if (item.user) {
+            // Check if it's the specific ADMIN_REPLIED marker
+            if (item.user.parts && item.user.parts[0].text !== '[ADMIN_REPLIED]') {
+                appendMessage(item.user, 'user');
+            }
+        }
+        if (item.bot) {
+            const type = item.bot.role === 'admin' ? 'admin-reply' : 'bot';
+            appendMessage(item.bot, type);
+        }
+    }
+
+    function appendMessage(content, type) {
+        const row = document.createElement('div');
+        row.className = `message-row ${type}`;
+
+        const bubble = document.createElement('div');
+        bubble.className = 'message-bubble';
+
+        // Role Label
+        const roleLabel = document.createElement('div');
+        roleLabel.className = 'message-role';
+        if (type === 'user') roleLabel.textContent = 'User';
+        else if (type === 'bot') roleLabel.textContent = 'Khumaira AI';
+        else roleLabel.textContent = 'Admin';
+        bubble.appendChild(roleLabel);
+
+        // Content Processing
+        if (content.parts) {
+            content.parts.forEach(part => {
+                if (part.text) {
+                    const textDiv = document.createElement('div');
+                    // Parse Markdown here!
+                    textDiv.innerHTML = marked.parse(part.text);
+                    bubble.appendChild(textDiv);
+                }
+
+                if (part.local_media) {
+                    const mediaDiv = document.createElement('div');
+                    mediaDiv.style.marginTop = '10px';
+                    const m = part.local_media;
+
+                    if (m.mime_type.startsWith('image/')) {
+                        mediaDiv.innerHTML = `<img src="${m.uri}" style="max-width: 100%; border-radius: 8px;">`;
+                    } else {
+                        mediaDiv.innerHTML = `<a href="${m.uri}" target="_blank" style="color: inherit; text-decoration: underline;">View ${m.filename || 'File'}</a>`;
+                    }
+                    bubble.appendChild(mediaDiv);
+                }
+            });
+        }
+
+        row.appendChild(bubble);
+        chatWindow.appendChild(row);
+    }
+
+    // --- Control Logic ---
+    controlToggle.addEventListener('change', function () {
+        const newStatus = this.checked ? 'admin' : 'bot';
 
         fetch(`/api/conversations/${activeChatId}/control`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: newStatus })
         })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                updateControlUI(data.new_status);
-            }
-        });
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    updateControlUI(newStatus);
+                } else {
+                    this.checked = !this.checked; // Revert on error
+                }
+            });
     });
 
-    replyForm.addEventListener('submit', function(e) {
+    function updateControlUI(status) {
+        const isAdmin = status === 'admin';
+        controlToggle.checked = isAdmin;
+        chatStatus.textContent = isAdmin ? 'Manual Control' : 'Managed by AI';
+
+        // Show/Hide Input Area
+        inputArea.style.display = isAdmin ? 'block' : 'none';
+
+        if (isAdmin) {
+            replyInput.focus();
+        }
+    }
+
+    // --- Reply Logic ---
+    replyForm.addEventListener('submit', function (e) {
         e.preventDefault();
         const text = replyInput.value.trim();
         if (!text) return;
+
+        // Optimistic UI Update
+        const tempContent = { role: 'admin', parts: [{ text: text }] };
+        appendMessage(tempContent, 'admin-reply');
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+        replyInput.value = '';
 
         fetch(`/api/conversations/${activeChatId}/reply`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text: text })
         })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                replyInput.value = '';
-            } else {
-                console.error("Failed to send reply:", data.error);
-            }
-        });
+            .then(res => res.json())
+            .then(data => {
+                if (!data.success) {
+                    alert('Failed to send message');
+                }
+            });
     });
 
-    function loadConversation(chatId) {
-        activeChatId = chatId;
-        chatHeader.textContent = `Chat with ${chatId}`;
-        chatPlaceholder.style.display = 'none';
-        controlContainer.style.display = 'block';
-        chatWindow.innerHTML = '<div class="d-flex justify-content-center align-items-center h-100"><div class="spinner-border text-success" role="status"></div></div>';
+    // --- Summarize Logic ---
+    btnSummarize.addEventListener('click', function () {
+        if (!activeChatId) return;
 
-        Promise.all([
-            fetch(`/api/conversations/${chatId}`),
-            fetch(`/api/conversations/${chatId}/control`)
-        ])
-        .then(responses => Promise.all(responses.map(res => res.json())))
-        .then(([history, controlStatus]) => {
-            chatWindow.innerHTML = '';
-            history.forEach(item => renderMessage(item));
-            chatWindow.scrollTop = chatWindow.scrollHeight;
-            updateControlUI(controlStatus.controlled_by);
-        })
-        .catch(error => {
-            console.error('Error loading conversation:', error);
-            chatWindow.innerHTML = '<p class="text-center text-danger">Failed to load conversation.</p>';
-        });
-    }
+        // button loading state
+        const originalIcon = this.innerHTML;
+        this.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>';
+        this.disabled = true;
 
-    function updateControlUI(status) {
-        controlButton.dataset.status = status;
-        if (status === 'admin') {
-            controlButton.textContent = 'Release Control';
-            controlButton.classList.remove('btn-outline-primary');
-            controlButton.classList.add('btn-primary');
-            replyFormContainer.style.display = 'block';
-        } else {
-            controlButton.textContent = 'Take Over';
-            controlButton.classList.remove('btn-primary');
-            controlButton.classList.add('btn-outline-primary');
-            replyFormContainer.style.display = 'none';
-        }
-    }
+        fetch(`/api/conversations/${activeChatId}/summarize`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.summary) {
+                    summaryCard.style.display = 'block';
+                    summaryText.innerHTML = marked.parse(data.summary);
+                }
+            })
+            .catch(err => {
+                alert('Could not summarize.');
+            })
+            .finally(() => {
+                this.innerHTML = originalIcon;
+                this.disabled = false;
+            });
+    });
 
-    function renderMessage(item) {
-        if (item.user) {
-            if (item.user.parts[0].text !== '[ADMIN_REPLIED]') {
-                appendMessage(item.user, 'user-message');
+    // --- WebSocket Logic ---
+    function setupGlobalWebSocket() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/all`;
+        globalWs = new WebSocket(wsUrl);
+
+        globalWs.onmessage = function (event) {
+            const msg = JSON.parse(event.data);
+
+            if (msg.type === 'new_message') {
+                handleIncomingMessage(msg.data);
+            } else if (msg.type === 'new_conversation') {
+                updateConversationList(msg.data.chat_id);
             }
-        }
-        if (item.bot) {
-            const type = item.bot.role === 'admin' ? 'admin-message' : 'bot-message';
-            appendMessage(item.bot, type);
-        }
-    }
-
-    function appendMessage(messageContent, type) {
-        if (!messageContent || !messageContent.parts) return;
-
-        const messageContainer = document.createElement('div');
-        messageContainer.className = 'message-container';
-
-        const messageElement = document.createElement('div');
-        const messageClass = type === 'admin-message' ? 'bot-message admin-reply' : type;
-        messageElement.className = `message ${messageClass}`;
-        
-        const roleElement = document.createElement('div');
-        roleElement.className = 'message-role';
-        if (type === 'user-message') {
-            roleElement.textContent = 'User';
-        } else if (type === 'admin-message') {
-            roleElement.textContent = 'Admin';
-            roleElement.style.color = '#dc3545';
-        } else {
-            roleElement.textContent = 'Assistant';
-        }
-        messageElement.appendChild(roleElement);
-
-        // Helper to get a friendly name and icon for mime types
-        const getFileInfo = (mimeType) => {
-            if (mimeType.includes('pdf')) return { name: 'PDF Document', icon: 'bi-file-earmark-pdf-fill' };
-            if (mimeType.includes('text')) return { name: 'Text File', icon: 'bi-file-earmark-text-fill' };
-            if (mimeType.includes('zip')) return { name: 'ZIP Archive', icon: 'bi-file-earmark-zip-fill' };
-            if (mimeType.includes('word')) return { name: 'Word Document', icon: 'bi-file-earmark-word-fill' };
-            return { name: 'File', icon: 'bi-file-earmark-arrow-down-fill' }; // Generic fallback
         };
 
-        // Process and append parts
-        messageContent.parts.forEach(part => {
-            if (part.text) {
-                const textElement = document.createElement('div');
-                textElement.className = 'message-text';
-                textElement.innerText = part.text.trim();
-                messageElement.appendChild(textElement);
-            }
-
-            if (part.local_media) {
-                const media = part.local_media;
-                let mediaWrapper = document.createElement('div');
-                mediaWrapper.className = 'media-container mt-2';
-                let mediaElement;
-
-                if (media.mime_type.startsWith('image/')) {
-                    mediaElement = document.createElement('img');
-                    mediaElement.src = media.uri;
-                    mediaElement.className = 'img-fluid rounded';
-                } else if (media.mime_type.startsWith('video/')) {
-                    mediaElement = document.createElement('video');
-                    mediaElement.src = media.uri;
-                    mediaElement.controls = true;
-                    mediaElement.className = 'w-100 rounded';
-                } else if (media.mime_type.startsWith('audio/')) {
-                    mediaElement = document.createElement('audio');
-                    mediaElement.src = media.uri;
-                    mediaElement.controls = true;
-                    mediaElement.className = 'w-100';
-                } else if (media.uri) { // Fallback for documents and other files
-                    const fileInfo = getFileInfo(media.mime_type);
-                    const displayName = media.filename || fileInfo.name;
-                    const downloadName = media.filename || media.uri.split('/').pop();
-                    
-                    mediaElement = document.createElement('a');
-                    mediaElement.href = media.uri;
-                    mediaElement.className = 'document-link';
-                    mediaElement.download = downloadName; // Use original or generated filename for download
-                    mediaElement.target = '_blank';
-
-                    mediaElement.innerHTML = `
-                        <div class="document-display d-flex align-items-center p-2 rounded">
-                            <i class="bi ${fileInfo.icon} fs-2 me-3"></i>
-                            <div class="flex-grow-1 overflow-hidden">
-                                <div class="fw-bold text-truncate">${displayName}</div>
-                                <div class="text-muted small">${media.mime_type}</div>
-                            </div>
-                        </div>
-                    `;
-                }
-
-                if (mediaElement) {
-                    mediaWrapper.appendChild(mediaElement);
-                    messageElement.appendChild(mediaWrapper);
-                }
-            }
-        });
-
-        messageContainer.appendChild(messageElement);
-        chatWindow.appendChild(messageContainer);
+        globalWs.onclose = () => setTimeout(setupGlobalWebSocket, 3000);
     }
 
-    // --- Initialize ---
-    fetchInitialConversations();
-    setupGlobalWebSocket();
+    function handleIncomingMessage(data) {
+        let { chat_id, message } = data;
+
+        // Ensure both are strings for comparison
+        chat_id = String(chat_id);
+        const currentActive = activeChatId ? String(activeChatId) : null;
+
+        console.log(`Incoming message for: ${chat_id}, Active: ${currentActive}`);
+
+        if (chat_id === currentActive) {
+            renderMessage(message);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        } else {
+            // Show badge on other chats
+            const item = document.querySelector(`.conversation-item[data-chat-id="${chat_id}"]`);
+            if (item) {
+                if (!item.querySelector('.chat-badge')) {
+                    item.querySelector('div').insertAdjacentHTML('beforeend', '<span class="chat-badge">New</span>');
+                }
+                // move to top
+                conversationsList.prepend(item);
+            } else {
+                updateConversationList(chat_id);
+            }
+        }
+    }
 });
