@@ -16,59 +16,47 @@ google_search_tool = types.Tool(
 db_gukar_tool = types.FunctionDeclaration(
     name="db_gukar_tool",
     description="""
-        Tool ini digunakan untuk mengambil detail data guru atau karyawan dari database. Gunakan tool ini HANYA untuk query SELECT. Tabelnya adalah `gukar` dengan kolom-kolom sebagai berikut:
-        - nama.
-        - gender: (String, 'L' atau 'P').
-        - golongan.
-        - nip: Nomor Induk Pegawai.
-        - tempat_lahir.
-        - tanggal_lahir: (string).
-        - pendidikan_terakhir:  Pendidikan terakhir.
-        - tahun_lulus: Tahun lulus pendidikan terakhir.
-        - bidang_studi: Bidang studi yang dikuasai.
-        - mengajar: Mata pelajaran yang diajar atau jabatan (karyawan, kepala sekolah dll)
-        - agama: Agama.
-        - no_hp: Nomor HP.
-        - email: Email.
-        - desa: Nama desa.
-        - alamat: Alamat lengkap.
-
-        kolom 'mengajar' tidak hanya berisi mapel yang diajar oleh guru, tapi juga bisa berisi jabatan guru atau jabatan karyawan.
-        jangan pernah tampilkan data Ibu kandung dan NIK guru.
-    """,
-    parameters=types.Schema(
-        type = "OBJECT",
-        properties = {
-            "sqlQuery": types.Schema(
-                type= "STRING",
-                description= "query SQL yang akan dieksekusi. Pastikan query adalah SELECT. Gunakan tabel 'gukar'. Contoh: SELECT `nama`, `tempat_lahir`, `tanggal_lahir`, `mengajar` FROM `gukar` WHERE `nama` LIKE '%nama_yang_dicari%'",
-            )
-        },
-        required = ["sqlQuery"]
-    )
-)
-
-db_siswa_tool = types.FunctionDeclaration(
-    name="db_siswa_tool",
-    description="""
-        Gunakan tool ini untuk mencari data siswa atau menghitung jumlah siswa berdasarkan nama, NISN (Nomor Induk Siswa Nasional), NIPD (Nomor Induk Peserta Didik), atau rombel_saat_ini (kelas).
-        Tool ini secara otomatis akan melakukan pencarian fuzzy (LIKE '%%term%%') pada kolom nama untuk mengatasi kesalahan ketik atau nama parsial, dan pencocokan persis untuk NISN dan NIPD.
-        Jika parameter aggregate diisi, tool ini akan mengembalikan hasil agregasi (misal jumlah siswa). Jika tidak, tool ini akan mengembalikan kolom: nama, jk (jenis kelamin), nisn, nipd, rombel_saat_ini.
+        Tool ini digunakan untuk mencari data guru atau karyawan dari database. Gunakan tool ini HANYA untuk query SELECT. 
+        Mendukung pencarian fuzzy (LIKE '%%term%%') pada nama, nip, atau mengajar.
+        Jangan pernah tampilkan data Ibu kandung dan NIK guru.
     """,
     parameters=types.Schema(
         type="OBJECT",
         properties={
             "search_term": types.Schema(
                 type="STRING",
-                description="Nama (atau bagian dari nama), NISN, atau NIPD siswa yang akan dicari. Contoh: 'budi', '0012345678'. bisa juga null jika mencari berdasarkan kelas",
+                description="Nama, NIP, atau mata pelajaran/jabatan yang dicari. Contoh: 'budi', 'guru matematika'",
+            ),
+            "columns": types.Schema(
+                type="ARRAY",
+                items={"type": "STRING"},
+                description="Daftar kolom yang ingin diambil. Kolom tersedia: nama, gender, nip, tempat_lahir, tanggal_lahir, pendidikan_terakhir, tahun_lulus, bidang_studi, mengajar, agama, no_hp, email, desa, alamat.",
+            ),
+        },
+        required=["search_term"]
+    )
+)
+
+db_siswa_tool = types.FunctionDeclaration(
+    name="db_siswa_tool",
+    description="""
+        Gunakan tool ini untuk mencari data siswa atau menghitung jumlah siswa berdasarkan nama, NISN, NIPD, atau rombel_saat_ini (kelas).
+        Mendukung pencarian fuzzy pada nama. Hasil agregasi (count) bisa diminta.
+    """,
+    parameters=types.Schema(
+        type="OBJECT",
+        properties={
+            "search_term": types.Schema(
+                type="STRING",
+                description="Nama, NISN, atau NIPD siswa yang dicari.",
             ),
             "rombel_saat_ini": types.Schema(
                 type="STRING",
-                description="Nama rombel atau kelas siswa saat ini. Contoh: 'X 1', 'XI 2'. bisa juga null jika mencari berdasarkan nama, nisn atau nipd saja",
+                description="Nama rombel atau kelas. Contoh: 'X 1'",
             ),
             "aggregate": types.Schema(
                 type="STRING",
-                description="Jenis agregasi yang akan dilakukan. Saat ini hanya mendukung 'count'. Contoh: 'count'",
+                description="Jenis agregasi. Hanya mendukung 'count'.",
             ),
         },
         required=[]
@@ -77,61 +65,37 @@ db_siswa_tool = types.FunctionDeclaration(
 
 db_update_tool = types.FunctionDeclaration(
     name="db_update_tool",
-    description="""
-        Tool ini digunakan untuk mengupdate satu atau beberapa kolom pada sebuah tabel di database berdasarkan key (where condition).
-        PENTING: pastikan where condition nya valid dan tidak salah.
-    """,
+    description="Tool ini digunakan untuk mengupdate data di database.",
     parameters=types.Schema(
-        type= "OBJECT",
-        properties= {
-            "table_name": types.Schema(
-                type= "STRING",
-                description= "Nama tabel yang akan diupdate. Contoh: 'siswa', 'gukar'",
+        type="OBJECT",
+        properties={
+            "table_name": types.Schema(type="STRING", description="Contoh: 'siswa', 'gukar'"),
+            "updates": types.Schema(
+                type="OBJECT",
+                description="Dictionary kolom dan nilai baru. Contoh: {'no_seri_ijazah': 'ABC12345', 'tahun_lulus': '2023'}",
             ),
-            "column_names": types.Schema(
-                type= "ARRAY",
-                items= {"type": "STRING"},
-                description= "Array yang berisi nama-nama kolom yang akan diupdate. Contoh: ['no_seri_ijazah', 'tahun_lulus']",
-            ),
-            "column_values": types.Schema(
-                type= "ARRAY",
-                items= {"type": "STRING"},
-                description= "Array yang berisi nilai-nilai baru untuk kolom-kolom yang diupdate. Contoh: ['ABC12345', '2023']. Pastikan urutannya sama dengan column_names.",
-            ),
-             "key": types.Schema(
-                type= "STRING",
-                description= "Kondisi WHERE untuk update. contoh: `nisn` = '1234567890'",
+            "where_clause": types.Schema(
+                type="OBJECT",
+                description="Dictionary kolom dan nilai untuk filter WHERE (AND). Contoh: {'nisn': '1234567890'}",
             ),
         },
-        required= ["table_name", "column_names", "column_values", "key"],
+        required=["table_name", "updates", "where_clause"],
     ),
 )
 
 db_insert_tool = types.FunctionDeclaration(
     name="db_insert_tool",
-    description="""
-        Tool ini digunakan untuk menambahkan data baru ke sebuah tabel di database.
-        PENTING: Pastikan data yang akan dimasukkan sudah valid dan sesuai dengan skema tabel.
-    """,
+    description="Tool ini digunakan untuk menambahkan data baru ke database.",
     parameters=types.Schema(
-        type= "OBJECT",
-        properties= {
-            "table_name": types.Schema(
-                type= "STRING",
-                description= "Nama tabel yang akan ditambahkan data. Contoh: 'siswa', 'gukar'",
-            ),
-            "column_names": types.Schema(
-                type= "ARRAY",
-                items= {"type": "STRING"},
-                description= "Array yang berisi nama-nama kolom yang akan diisi datanya. Contoh: ['nisn', 'nama', 'jk']",
-            ),
-            "column_values": types.Schema(
-                type= "ARRAY",
-                items= {"type": "STRING"},
-                description= "Array yang berisi nilai-nilai baru untuk kolom-kolom yang akan diisi. Contoh: ['1234567890', 'Nama Siswa', 'L']. Pastikan urutannya sama dengan column_names.",
+        type="OBJECT",
+        properties={
+            "table_name": types.Schema(type="STRING", description="Contoh: 'siswa', 'gukar'"),
+            "data": types.Schema(
+                type="OBJECT",
+                description="Dictionary kolom dan nilai yang akan dimasukkan.",
             ),
         },
-        required= ["table_name", "column_names", "column_values"],
+        required=["table_name", "data"],
     )
 )
 
@@ -177,15 +141,22 @@ extra_tools = types.Tool(
 
 async def _handle_db_gukar_tool(args: Dict, db_pool) -> types.Part:
     tool_name = "db_gukar_tool"
-    sql_query = args.get("sqlQuery")
-    if not sql_query:
-        return _create_error_response(tool_name, "sqlQuery tidak ditemukan.")
+    search_term = args.get("search_term")
+    cols = args.get("columns", ["nama", "nip", "mengajar"])
     
-    if not sql_query.strip().upper().startswith("SELECT"):
-        return _create_error_response(tool_name, "Tool ini hanya bisa digunakan untuk query SELECT.")
+    # Whitelist columns to prevent injection via column names
+    allowed_cols = ["nama", "gender", "golongan", "nip", "tempat_lahir", "tanggal_lahir", 
+                    "pendidikan_terakhir", "tahun_lulus", "bidang_studi", "mengajar", 
+                    "agama", "no_hp", "email", "desa", "alamat"]
+    safe_cols = [c for c in cols if c in allowed_cols]
+    if not safe_cols: safe_cols = ["nama", "nip", "mengajar"]
+    
+    col_str = ", ".join([f"`{c}`" for c in safe_cols])
+    sql_query = f"SELECT {col_str} FROM `gukar` WHERE `nama` LIKE %s OR `nip` = %s OR `mengajar` LIKE %s"
+    params = (f"%{search_term}%", search_term, f"%{search_term}%")
     
     try:
-        query_result = await execute_sql_query(db_pool, sql_query)
+        query_result = await execute_sql_query(db_pool, sql_query, params=params)
         return types.Part.from_function_response(
             name=tool_name,
             response={'result': str(query_result)},
@@ -233,48 +204,63 @@ async def _handle_db_siswa_tool(args: Dict, db_pool) -> types.Part:
         return _create_error_response(tool_name, f"Error executing database operation: {e}")
 
 async def _handle_db_update_tool(args: Dict, db_pool) -> types.Part:
+    tool_name = "db_update_tool"
     table_name = args.get("table_name")
-    column_names = args.get("column_names")
-    column_values = args.get("column_values")
-    key = args.get("key")
+    updates = args.get("updates")
+    where_clause = args.get("where_clause")
 
-    if not all([table_name, column_names, column_values, key]):
-        return _create_error_response("db_update_tool", "Missing required arguments")
-    if not isinstance(column_names, list) or not isinstance(column_values, list) or len(column_names) != len(column_values):
-        return _create_error_response("db_update_tool", "column_names and column_values must be lists of the same length.")
+    if not all([table_name, updates, where_clause]):
+        return _create_error_response(tool_name, "Missing required arguments")
     
-    set_clause = ", ".join([f"`{col}` = '{val}'" for col, val in zip(column_names, column_values)])
-    sql_query = f"UPDATE {table_name} SET {set_clause} WHERE {key}"
+    if table_name not in ["siswa", "gukar"]:
+        return _create_error_response(tool_name, "Table not allowed.")
+
+    set_parts = []
+    params = []
+    for col, val in updates.items():
+        set_parts.append(f"`{col}` = %s")
+        params.append(val)
+    
+    where_parts = []
+    for col, val in where_clause.items():
+        where_parts.append(f"`{col}` = %s")
+        params.append(val)
+    
+    sql_query = f"UPDATE `{table_name}` SET {', '.join(set_parts)} WHERE {' AND '.join(where_parts)}"
     try:
-        query_result = await execute_sql_query(db_pool, sql_query)
+        query_result = await execute_sql_query(db_pool, sql_query, params=tuple(params))
         return types.Part.from_function_response(
-            name="db_update_tool",
+            name=tool_name,
             response={'result': str(query_result)},
         )
     except DatabaseError as e:
-        return _create_error_response("db_update_tool", f"Error executing database operation: {e}")
+        return _create_error_response(tool_name, f"Error executing database operation: {e}")
 
 async def _handle_db_insert_tool(args: Dict, db_pool) -> types.Part:
+    tool_name = "db_insert_tool"
     table_name = args.get("table_name")
-    column_names = args.get("column_names")
-    column_values = args.get("column_values")
+    data = args.get("data")
 
-    if not all([table_name, column_names, column_values]):
-        return _create_error_response("db_insert_tool", "Missing required arguments")
-    if not isinstance(column_names, list) or not isinstance(column_values, list) or len(column_names) != len(column_values):
-        return _create_error_response("db_insert_tool", "column_names and column_values must be lists of the same length.")
+    if not all([table_name, data]):
+        return _create_error_response(tool_name, "Missing required arguments")
+    
+    if table_name not in ["siswa", "gukar"]:
+        return _create_error_response(tool_name, "Table not allowed.")
 
-    placeholders = ", ".join(["%s"] * len(column_names))
-    columns = ", ".join([f"`{col}`" for col in column_names])
-    sql_query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
+    cols = data.keys()
+    vals = data.values()
+    placeholders = ", ".join(["%s"] * len(cols))
+    column_str = ", ".join([f"`{c}`" for c in cols])
+    
+    sql_query = f"INSERT INTO `{table_name}` ({column_str}) VALUES ({placeholders})"
     try:
-        query_result = await execute_sql_query(db_pool, sql_query, params=tuple(column_values))
+        query_result = await execute_sql_query(db_pool, sql_query, params=tuple(vals))
         return types.Part.from_function_response(
-            name="db_insert_tool",
+            name=tool_name,
             response={'result': str(query_result)}
         )
     except DatabaseError as e:
-        return _create_error_response("db_insert_tool", f"Error executing database operation: {e}")
+        return _create_error_response(tool_name, f"Error executing database operation: {e}")
 
 async def _handle_cctv_tool(args: Dict) -> types.Part:
     try:
@@ -310,7 +296,7 @@ async def _handle_ss_tool(args: Dict, client) -> types.Part:
         )
     except Exception as e:
         return types.Part.from_function_response(
-            name="take_screenshot",
+            name="ss_tool",
             response={"result": f"Error: {e}"}
         )
 

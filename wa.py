@@ -30,10 +30,12 @@ TEMPLATES_DIR = BASE_DIR / 'templates'
 
 # --- Logika Inti Bot ---
 async def generate_gemini_response(content: types.Content, chat_id: str, app: web.Application, user_message_dict: dict, chat_history: Optional[List[types.Content]] = None):
-    """Generates a Gemini response with optional chat history."""
+    """Generates a Gemini response and handles potential tool calls."""
     global db_pool
     try:
         contents = chat_history + [content] if chat_history else [content]
+        
+        # Initial generate_content call
         response = client.models.generate_content(
             model=config.GOOGLE_MODEL,
             contents=contents,
@@ -42,9 +44,7 @@ async def generate_gemini_response(content: types.Content, chat_id: str, app: we
                 max_output_tokens=6000,
                 system_instruction=config.SYSTEM_PROMPT,
                 tools=[tools.db_tool, tools.extra_tools],
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                    disable=True
-                ),
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                 safety_settings=[
                     types.SafetySetting(category='HARM_CATEGORY_HATE_SPEECH', threshold='BLOCK_NONE'),
                     types.SafetySetting(category='HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold='BLOCK_NONE'),
@@ -53,12 +53,14 @@ async def generate_gemini_response(content: types.Content, chat_id: str, app: we
                 ],
             ),
         )
-        res_parts = response.candidates[0].content.parts
-        response_text = "".join(part.text + "\n" for part in res_parts if part.text)
-        function_call_parts = [part.function_call for part in res_parts if part.function_call]
-        
-        # Save user message dict and bot response content
-        await database.save_chat_to_db(db_pool, chat_id, user_message_dict, response.candidates[0].content)
+
+        candidate = response.candidates[0]
+        res_parts = candidate.content.parts
+
+        # Save conversation turn to DB
+        # If user_message_dict is empty (recursive call), we save the tool response as the 'user' part
+        save_user_dict = user_message_dict if user_message_dict else content_to_dict(content)
+        await database.save_chat_to_db(db_pool, chat_id, save_user_dict, candidate.content)
         
         # Broadcast the bot message to the UI
         bot_message_broadcast = {
@@ -67,28 +69,36 @@ async def generate_gemini_response(content: types.Content, chat_id: str, app: we
                 'chat_id': chat_id,
                 'message': {
                     'user': None,
-                    'bot': content_to_dict(response.candidates[0].content)
+                    'bot': content_to_dict(candidate.content)
                 }
             }
         }
         for ws in app['websockets']:
             await ws.send_json(bot_message_broadcast)
 
-        if response_text:
-            await whatsapp_service.send_whatsapp_message(chat_id, response_text, vars(config))
+        # Send text response to WhatsApp if any
+        response_text = "".join(part.text + "\n" for part in res_parts if part.text)
+        if response_text.strip():
+            await whatsapp_service.send_whatsapp_message(chat_id, response_text.strip(), vars(config))
         
-        if function_call_parts:
-             function_response_parts = []
-             for function_call in function_call_parts:
-                fc_res = await tools.handle_tool_call(function_call, db_pool, client)
-                function_response_parts.append(fc_res)
-             
-             fc_content = types.Content(role="tool", parts=function_response_parts)
-             # The user_message_dict is not passed in the recursive call as it's part of the history already
-             await generate_gemini_response(fc_content, chat_id, app, {}, chat_history=contents + [response.candidates[0].content])
+        # Handle Function Calls
+        function_calls = [part.function_call for part in res_parts if part.function_call]
+        if function_calls:
+            function_responses = []
+            for fc in function_calls:
+                logging.info(f"Executing tool: {fc.name} with args: {fc.args}")
+                fc_res_part = await tools.handle_tool_call(fc, db_pool, client)
+                function_responses.append(fc_res_part)
+            
+            # Create tool content with responses
+            tool_content = types.Content(role="tool", parts=function_responses)
+            
+            # Recursive call with updated history (current candidate content + tool response)
+            # Empty user_message_dict to avoid double saving the original user message
+            await generate_gemini_response(tool_content, chat_id, app, {}, chat_history=contents + [candidate.content])
 
     except Exception as e:
-        logging.exception("Error generating Gemini response:")
+        logging.exception("Error in generate_gemini_response:")
         await whatsapp_service.send_whatsapp_message(chat_id, "Maaf, terjadi kesalahan saat memproses permintaan Anda.", vars(config))
 
 async def handle_whatsapp_message(message_data: dict, app: web.Application):
