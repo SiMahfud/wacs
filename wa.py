@@ -741,6 +741,8 @@ async def main():
 
     app.router.add_static('/static/', path=str(BASE_DIR / 'static'), name='static')
 
+    app['start_time'] = time.time()
+
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, 'localhost', 8123)
@@ -749,8 +751,6 @@ async def main():
     logging.info("Server started, listening on http://localhost:8123")
     logging.info("Admin UI available at http://localhost:8123/admin")
     logging.info("Login page at http://localhost:8123/admin/login")
-    
-    app['start_time'] = time.time()
 
     try:
        while True:

@@ -24,16 +24,19 @@
         </div>
     </div>
 
+    <!-- Mobile sidebar overlay -->
+    <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
     <div class="layout-container">
         <!-- 1. Sidebar: Conversations -->
-        <div class="sidebar glass-panel">
+        <div id="sidebar" class="sidebar glass-panel">
             <div class="sidebar-header">
                 <div class="sidebar-title-row">
-                    <h4 style="margin: 0; color: white;">Conversations</h4>
+                    <h4 style="margin: 0; color: white;"><span class="online-dot"></span> Conversations</h4>
                     <button id="btn-logout" class="btn-icon" title="Logout"><i
                             class="bi bi-box-arrow-right"></i></button>
                 </div>
-                <input type="text" id="search-input" class="search-box" placeholder="Search chats...">
+                <input type="text" id="search-input" class="search-box" placeholder="Cari nama atau nomor...">
             </div>
             <div id="conversations-list" class="conversation-list">
                 <!-- Javascript will populate this -->
@@ -44,11 +47,12 @@
         <div class="chat-area">
             <div class="chat-header">
                 <div class="d-flex align-items-center">
+                    <button id="btn-hamburger" class="btn-hamburger" title="Menu"><i class="bi bi-list"></i></button>
                     <i class="bi bi-person-circle fs-3 me-3" style="color: var(--text-secondary);"></i>
                     <div>
-                        <h3 id="chat-title">Select a Chat</h3>
-                        <span id="chat-status" class="info-label" style="text-transform: none;">Waiting for
-                            selection...</span>
+                        <h3 id="chat-title">Pilih Percakapan</h3>
+                        <span id="chat-status" class="info-label" style="text-transform: none;">Menunggu
+                            pilihan...</span>
                     </div>
                 </div>
                 <div id="control-panel" style="display: none; align-items: center; gap: 10px;">
@@ -78,8 +82,9 @@
 
             <div id="chat-window" class="chat-messages">
                 <div class="empty-state">
-                    <i class="bi bi-chat-square-text" style="font-size: 4rem; margin-bottom: 20px;"></i>
-                    <p>Select a conversation to start monitoring</p>
+                    <div class="empty-state-icon"><i class="bi bi-chat-square-text"></i></div>
+                    <h3>Selamat Datang 👋</h3>
+                    <p>Pilih percakapan di sidebar untuk mulai monitoring</p>
                 </div>
             </div>
 

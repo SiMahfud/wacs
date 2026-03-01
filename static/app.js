@@ -1,5 +1,8 @@
 document.addEventListener('DOMContentLoaded', function () {
     // ===== DOM Elements =====
+    const sidebar = document.getElementById('sidebar');
+    const sidebarOverlay = document.getElementById('sidebar-overlay');
+    const btnHamburger = document.getElementById('btn-hamburger');
     const conversationsList = document.getElementById('conversations-list');
     const searchInput = document.getElementById('search-input');
     const chatWindow = document.getElementById('chat-window');
@@ -56,6 +59,29 @@ document.addEventListener('DOMContentLoaded', function () {
     let allChats = [];
     let globalWs = null;
 
+    // ===== Phone Number Formatting =====
+    function formatPhoneNumber(number) {
+        if (!number) return number;
+        const num = String(number);
+        // Indonesian number: 6281234567890 -> +62 812-3456-7890
+        if (num.startsWith('62') && num.length >= 10) {
+            const country = '+62';
+            const rest = num.substring(2);
+            if (rest.length >= 9) {
+                const p1 = rest.substring(0, 3);
+                const p2 = rest.substring(3, 7);
+                const p3 = rest.substring(7);
+                return `${country} ${p1}-${p2}-${p3}`;
+            }
+            return `${country} ${rest}`;
+        }
+        // Non-Indonesian: add + if length > 8
+        if (num.length > 8 && !num.startsWith('+')) {
+            return '+' + num;
+        }
+        return num;
+    }
+
     // ===== Init =====
     fetchStats();
     fetchInitialConversations();
@@ -65,6 +91,27 @@ document.addEventListener('DOMContentLoaded', function () {
     setupGlobalWebSocket();
     setInterval(fetchStats, 60000);
     setInterval(fetchAnalytics, 120000);
+
+    // ===== Mobile Sidebar Toggle =====
+    if (btnHamburger) {
+        btnHamburger.addEventListener('click', () => {
+            sidebar.classList.toggle('open');
+            sidebarOverlay.classList.toggle('open');
+        });
+    }
+    if (sidebarOverlay) {
+        sidebarOverlay.addEventListener('click', () => {
+            sidebar.classList.remove('open');
+            sidebarOverlay.classList.remove('open');
+        });
+    }
+
+    function closeMobileSidebar() {
+        if (window.innerWidth <= 768) {
+            sidebar.classList.remove('open');
+            sidebarOverlay.classList.remove('open');
+        }
+    }
 
     // ===== Tabs =====
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -80,10 +127,16 @@ document.addEventListener('DOMContentLoaded', function () {
     function showToast(message, type = 'info') {
         const container = document.getElementById('toast-container');
         const toast = document.createElement('div');
+        const icon = type === 'success' ? 'check-circle-fill' : type === 'error' ? 'x-circle-fill' : 'info-circle-fill';
         toast.className = `toast ${type}`;
-        toast.innerHTML = `<i class="bi bi-${type === 'success' ? 'check-circle' : type === 'error' ? 'x-circle' : 'info-circle'}"></i> ${message}`;
+        toast.innerHTML = `<i class="bi bi-${icon}"></i> ${message}`;
         container.appendChild(toast);
-        setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3000);
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateX(30px)';
+            toast.style.transition = 'all 0.3s ease';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
     }
 
     // ===== Modal =====
@@ -101,7 +154,6 @@ document.addEventListener('DOMContentLoaded', function () {
             btn.addEventListener('click', () => { a.onClick(); modalOverlay.style.display = 'none'; });
             actionsDiv.appendChild(btn);
         });
-        // Add cancel
         const cancelBtn = document.createElement('button');
         cancelBtn.className = 'btn';
         cancelBtn.style.background = 'var(--text-secondary)';
@@ -129,7 +181,12 @@ document.addEventListener('DOMContentLoaded', function () {
     // ===== Search =====
     searchInput.addEventListener('input', (e) => {
         const query = e.target.value.toLowerCase();
-        const filtered = allChats.filter(c => c.id.toLowerCase().includes(query) || (c.label && c.label.toLowerCase().includes(query)));
+        const filtered = allChats.filter(c => {
+            const id = (c.id || c).toLowerCase();
+            const label = (c.label || '').toLowerCase();
+            const formatted = formatPhoneNumber(c.id || c).toLowerCase();
+            return id.includes(query) || label.includes(query) || formatted.includes(query);
+        });
         renderConversationList(filtered);
     });
 
@@ -175,16 +232,21 @@ document.addEventListener('DOMContentLoaded', function () {
                 chartDaily.appendChild(bar);
             });
         } else {
-            chartDaily.innerHTML = '<span style="color: var(--text-secondary); font-size: 0.8rem;">No data</span>';
+            chartDaily.innerHTML = '<span style="color: var(--text-muted); font-size: 0.8rem; padding: 20px;">Belum ada data</span>';
         }
 
         // Top chats
         topChatsList.innerHTML = '';
         if (data.top_chats) {
-            data.top_chats.forEach(c => {
+            data.top_chats.forEach((c, i) => {
                 const item = document.createElement('div');
                 item.className = 'mini-list-item';
-                item.innerHTML = `<span class="item-text" style="font-size: 0.75rem;">${c.chat_id}</span><span style="color: var(--accent-color); font-weight: 600; font-size: 0.8rem;">${c.count}</span>`;
+                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
+                item.innerHTML = `
+                    <span style="margin-right: 6px; font-size: 0.9rem;">${medal}</span>
+                    <span class="item-text" style="font-size: 0.78rem;">${formatPhoneNumber(c.chat_id)}</span>
+                    <span style="color: var(--accent-color); font-weight: 600; font-size: 0.8rem;">${c.count}</span>
+                `;
                 topChatsList.appendChild(item);
             });
         }
@@ -202,23 +264,37 @@ document.addEventListener('DOMContentLoaded', function () {
     function renderConversationList(chats) {
         conversationsList.innerHTML = '';
         if (chats.length === 0) {
-            conversationsList.innerHTML = '<div style="padding: 20px; color: var(--text-secondary); text-align: center; font-size: 0.85rem;">No chats found</div>';
+            conversationsList.innerHTML = `
+                <div style="padding: 30px 20px; color: var(--text-muted); text-align: center; font-size: 0.85rem;">
+                    <i class="bi bi-inbox" style="font-size: 2rem; display: block; margin-bottom: 8px; opacity: 0.5;"></i>
+                    Tidak ada chat
+                </div>`;
             return;
         }
         chats.forEach(chat => {
-            const id = chat.id || chat;
+            const id = String(chat.id || chat);
             const label = chat.label;
+            const formattedNumber = formatPhoneNumber(id);
+
             const el = document.createElement('div');
             el.className = `conversation-item ${id === activeChatId ? 'active' : ''}`;
             el.dataset.chatId = id;
             el.innerHTML = `
                 <div class="chat-info">
-                    <i class="bi bi-person-circle" style="color: var(--text-secondary); font-size: 1.2rem;"></i>
-                    <span>${id}</span>
+                    <div class="chat-avatar"><i class="bi bi-person-fill"></i></div>
+                    <div class="chat-details">
+                        <span class="chat-name">${formattedNumber}</span>
+                        <span class="chat-preview">${label ? '🏷️ ' + label : 'WhatsApp Chat'}</span>
+                    </div>
                 </div>
-                ${label ? `<span class="label-badge">${label}</span>` : ''}
+                <div class="chat-meta">
+                    ${label ? `<span class="label-badge">${label}</span>` : ''}
+                </div>
             `;
-            el.addEventListener('click', () => loadConversation(id));
+            el.addEventListener('click', () => {
+                loadConversation(id);
+                closeMobileSidebar();
+            });
             conversationsList.appendChild(el);
         });
     }
@@ -233,8 +309,8 @@ document.addEventListener('DOMContentLoaded', function () {
     // ===== Load Conversation =====
     async function loadConversation(chatId) {
         activeChatId = chatId;
-        chatTitle.textContent = chatId;
-        chatStatus.textContent = "Loading...";
+        chatTitle.textContent = formatPhoneNumber(chatId);
+        chatStatus.textContent = "Memuat...";
         controlPanel.style.display = 'flex';
         inputArea.style.display = 'none';
         summaryCard.style.display = 'none';
@@ -248,7 +324,13 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
 
-        chatWindow.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:100%;"><div class="spinner"></div></div>';
+        chatWindow.innerHTML = `
+            <div style="display:flex;justify-content:center;align-items:center;height:100%;flex-direction:column;gap:10px;">
+                <div style="width:32px;height:32px;border:3px solid var(--accent-color);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+                <span style="color:var(--text-muted);font-size:0.8rem;">Memuat pesan...</span>
+            </div>
+            <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+        `;
 
         try {
             const [historyRes, controlRes] = await Promise.all([
@@ -264,11 +346,15 @@ document.addEventListener('DOMContentLoaded', function () {
             if (Array.isArray(history) && history.length > 0) {
                 history.forEach(item => renderMessage(item));
             } else {
-                chatWindow.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--text-secondary);">No messages yet.</div>';
+                chatWindow.innerHTML = `
+                    <div style="text-align:center; padding: 40px 20px; color: var(--text-muted);">
+                        <i class="bi bi-chat" style="font-size: 2rem; display: block; margin-bottom: 8px; opacity: 0.5;"></i>
+                        Belum ada pesan
+                    </div>`;
             }
             chatWindow.scrollTop = chatWindow.scrollHeight;
             updateControlUI(controlStatus.controlled_by);
-            chatStatus.textContent = controlStatus.controlled_by === 'bot' ? 'Managed by AI' : 'Manual Control';
+            chatStatus.textContent = controlStatus.controlled_by === 'bot' ? '🤖 Managed by AI' : '👤 Manual Control';
 
             // Show label
             const chat = allChats.find(c => (c.id || c) === chatId);
@@ -278,12 +364,12 @@ document.addEventListener('DOMContentLoaded', function () {
                 currentLabel.className = 'label-badge';
             } else {
                 labelDisplay.style.display = 'block';
-                currentLabel.textContent = 'None';
+                currentLabel.textContent = 'Belum ada';
                 currentLabel.className = 'label-badge empty';
             }
         } catch (error) {
             console.error('Error loading chat:', error);
-            chatWindow.innerHTML = '<p style="color: var(--danger-color); text-align: center;">Failed to load conversation.</p>';
+            chatWindow.innerHTML = '<p style="color: var(--danger-color); text-align: center;">Gagal memuat percakapan.</p>';
         }
     }
 
@@ -309,9 +395,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const roleLabel = document.createElement('div');
         roleLabel.className = 'message-role';
-        if (type === 'user') roleLabel.textContent = 'User';
-        else if (type === 'bot') roleLabel.textContent = 'Khumaira AI';
-        else roleLabel.textContent = 'Admin';
+        if (type === 'user') roleLabel.textContent = '👤 User';
+        else if (type === 'bot') roleLabel.textContent = '🤖 Khumaira AI';
+        else roleLabel.textContent = '👨‍💼 Admin';
         bubble.appendChild(roleLabel);
 
         if (content.parts) {
@@ -326,9 +412,13 @@ document.addEventListener('DOMContentLoaded', function () {
                     mediaDiv.style.marginTop = '8px';
                     const m = part.local_media;
                     if (m.mime_type && m.mime_type.startsWith('image/')) {
-                        mediaDiv.innerHTML = `<img src="${m.uri}" style="max-width: 100%; border-radius: 8px;" loading="lazy">`;
+                        mediaDiv.innerHTML = `<img src="${m.uri}" style="max-width: 100%; border-radius: 8px; cursor: pointer;" loading="lazy" onclick="window.open('${m.uri}', '_blank')">`;
+                    } else if (m.mime_type && m.mime_type.startsWith('video/')) {
+                        mediaDiv.innerHTML = `<video src="${m.uri}" controls style="max-width: 100%; border-radius: 8px;"></video>`;
+                    } else if (m.mime_type && m.mime_type.startsWith('audio/')) {
+                        mediaDiv.innerHTML = `<audio src="${m.uri}" controls style="width: 100%;"></audio>`;
                     } else {
-                        mediaDiv.innerHTML = `<a href="${m.uri}" target="_blank" style="color: inherit; text-decoration: underline;">📎 ${m.filename || 'File'}</a>`;
+                        mediaDiv.innerHTML = `<a href="${m.uri}" target="_blank" style="color: inherit; text-decoration: none; display: flex; align-items: center; gap: 8px; padding: 8px; background: rgba(0,0,0,0.2); border-radius: 8px;"><i class="bi bi-file-earmark" style="font-size: 1.2rem;"></i> ${m.filename || 'File'}</a>`;
                     }
                     bubble.appendChild(mediaDiv);
                 }
@@ -360,7 +450,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const data = await res.json();
         if (data.success) {
             updateControlUI(newStatus);
-            showToast(`Mode: ${newStatus === 'admin' ? 'Manual Control' : 'AI Managed'}`, 'success');
+            showToast(`Mode: ${newStatus === 'admin' ? 'Manual Control 👤' : 'AI Managed 🤖'}`, 'success');
         } else {
             this.checked = !this.checked;
         }
@@ -369,7 +459,7 @@ document.addEventListener('DOMContentLoaded', function () {
     function updateControlUI(status) {
         const isAdmin = status === 'admin';
         controlToggle.checked = isAdmin;
-        chatStatus.textContent = isAdmin ? 'Manual Control' : 'Managed by AI';
+        chatStatus.textContent = isAdmin ? '👤 Manual Control' : '🤖 Managed by AI';
         inputArea.style.display = isAdmin ? 'block' : 'none';
         if (isAdmin) replyInput.focus();
     }
@@ -391,7 +481,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
         if (res) {
             const data = await res.json();
-            if (!data.success) showToast('Failed to send message', 'error');
+            if (!data.success) showToast('Gagal mengirim pesan', 'error');
         }
     });
 
@@ -435,7 +525,11 @@ document.addEventListener('DOMContentLoaded', function () {
         const results = await res.json();
         chatWindow.innerHTML = '';
         if (results.length === 0) {
-            chatWindow.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--text-secondary);">No results found.</div>';
+            chatWindow.innerHTML = `
+                <div style="text-align:center; padding: 40px 20px; color: var(--text-muted);">
+                    <i class="bi bi-search" style="font-size: 2rem; display: block; margin-bottom: 8px; opacity: 0.5;"></i>
+                    Tidak ditemukan hasil untuk "${q}"
+                </div>`;
         } else {
             results.forEach(item => renderMessage(item));
         }
@@ -445,9 +539,9 @@ document.addEventListener('DOMContentLoaded', function () {
     // ===== Export =====
     btnExport.addEventListener('click', () => {
         if (!activeChatId) return;
-        showModal('Export Chat', '<p>Pilih format export:</p>', [
-            { text: 'CSV', onClick: () => window.open(`/api/conversations/${activeChatId}/export?format=csv`, '_blank') },
-            { text: 'JSON', onClick: () => window.open(`/api/conversations/${activeChatId}/export?format=json`, '_blank') }
+        showModal('📥 Export Chat', '<p>Pilih format export:</p>', [
+            { text: '📊 CSV', onClick: () => window.open(`/api/conversations/${activeChatId}/export?format=csv`, '_blank') },
+            { text: '📄 JSON', onClick: () => window.open(`/api/conversations/${activeChatId}/export?format=json`, '_blank') }
         ]);
     });
 
@@ -457,7 +551,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const chat = allChats.find(c => (c.id || c) === activeChatId);
         const currentLbl = chat ? chat.label || '' : '';
         modalContent.innerHTML = `
-            <h3>Set Label</h3>
+            <h3>🏷️ Set Label</h3>
             <p style="color: var(--text-secondary); margin-bottom: 12px;">Kategorisasi: siswa, guru, wali murid, dll</p>
             <input type="text" id="label-input" class="input-field" value="${currentLbl}" placeholder="Masukkan label..." style="width: 100%; box-sizing: border-box;">
             <div class="modal-actions" style="margin-top: 15px;">
@@ -466,6 +560,7 @@ document.addEventListener('DOMContentLoaded', function () {
             </div>
         `;
         modalOverlay.style.display = 'flex';
+        document.getElementById('label-input').focus();
         document.getElementById('label-save').addEventListener('click', async () => {
             const newLabel = document.getElementById('label-input').value.trim();
             const res = await apiFetch(`/api/conversations/${activeChatId}/label`, {
@@ -476,11 +571,11 @@ document.addEventListener('DOMContentLoaded', function () {
             if (res) {
                 const data = await res.json();
                 if (data.success) {
-                    showToast('Label updated', 'success');
+                    showToast('Label diperbarui', 'success');
                     const c = allChats.find(c => (c.id || c) === activeChatId);
                     if (c) c.label = newLabel;
                     renderConversationList(allChats);
-                    currentLabel.textContent = newLabel || 'None';
+                    currentLabel.textContent = newLabel || 'Belum ada';
                     currentLabel.className = newLabel ? 'label-badge' : 'label-badge empty';
                 }
             }
@@ -492,21 +587,26 @@ document.addEventListener('DOMContentLoaded', function () {
     // ===== Delete Chat =====
     btnDeleteChat.addEventListener('click', () => {
         if (!activeChatId) return;
-        showModal('Hapus Percakapan', `<p>Yakin ingin menghapus semua data chat <b>${activeChatId}</b>? Tindakan ini tidak bisa dibatalkan.</p>`, [
+        showModal('⚠️ Hapus Percakapan', `<p>Yakin ingin menghapus semua data chat <b>${formatPhoneNumber(activeChatId)}</b>?</p><p style="color: var(--danger-color); font-size: 0.8rem;">Tindakan ini tidak bisa dibatalkan.</p>`, [
             {
-                text: 'Hapus', class: 'btn-danger',
+                text: '🗑️ Hapus', class: 'btn-danger',
                 onClick: async () => {
                     const res = await apiFetch(`/api/conversations/${activeChatId}`, { method: 'DELETE' });
                     if (res) {
                         const data = await res.json();
                         if (data.success) {
-                            showToast('Chat deleted', 'success');
+                            showToast('Chat berhasil dihapus', 'success');
                             allChats = allChats.filter(c => (c.id || c) !== activeChatId);
                             renderConversationList(allChats);
                             activeChatId = null;
-                            chatWindow.innerHTML = '<div class="empty-state"><i class="bi bi-chat-square-text" style="font-size: 4rem; margin-bottom: 20px;"></i><p>Select a conversation</p></div>';
-                            chatTitle.textContent = 'Select a Chat';
-                            chatStatus.textContent = 'Waiting for selection...';
+                            chatWindow.innerHTML = `
+                                <div class="empty-state">
+                                    <div class="empty-state-icon"><i class="bi bi-chat-square-text"></i></div>
+                                    <h3>Pilih Percakapan</h3>
+                                    <p>Pilih dari sidebar untuk mulai monitoring</p>
+                                </div>`;
+                            chatTitle.textContent = 'Pilih Percakapan';
+                            chatStatus.textContent = 'Menunggu pilihan...';
                             controlPanel.style.display = 'none';
                             inputArea.style.display = 'none';
                         }
@@ -520,9 +620,9 @@ document.addEventListener('DOMContentLoaded', function () {
     btnBroadcast.addEventListener('click', async () => {
         const message = broadcastText.value.trim();
         if (!message) return showToast('Tulis pesan broadcast dulu', 'error');
-        showModal('Konfirmasi Broadcast', '<p>Pesan akan dikirim ke <b>semua</b> kontak. Lanjutkan?</p>', [
+        showModal('📢 Konfirmasi Broadcast', '<p>Pesan akan dikirim ke <b>semua</b> kontak. Lanjutkan?</p>', [
             {
-                text: 'Kirim', class: 'btn-primary',
+                text: '🚀 Kirim', class: 'btn-primary',
                 onClick: async () => {
                     btnBroadcast.disabled = true;
                     btnBroadcast.innerHTML = '<i class="bi bi-hourglass-split"></i> Mengirim...';
@@ -558,31 +658,30 @@ document.addEventListener('DOMContentLoaded', function () {
     function renderTemplates(templates) {
         templatesList.innerHTML = '';
         if (!templates || templates.length === 0) {
-            templatesList.innerHTML = '<div style="padding: 6px; color: var(--text-secondary); font-size: 0.75rem;">No templates</div>';
+            templatesList.innerHTML = '<div style="padding: 10px; color: var(--text-muted); font-size: 0.78rem; text-align: center;"><i class="bi bi-file-text"></i> Belum ada template</div>';
             return;
         }
         templates.forEach(t => {
             const item = document.createElement('div');
             item.className = 'mini-list-item';
             item.innerHTML = `
-                <div class="item-text" style="cursor: pointer;" title="Click to use">
+                <div class="item-text" style="cursor: pointer;" title="Klik untuk memakai">
                     <div class="item-keyword">${t.name}</div>
                     <div class="item-response">${t.content.substring(0, 50)}${t.content.length > 50 ? '...' : ''}</div>
                 </div>
-                <button class="btn-delete-item" data-id="${t.id}"><i class="bi bi-trash3"></i></button>
+                <button class="btn-delete-item" data-id="${t.id}" title="Hapus"><i class="bi bi-trash3"></i></button>
             `;
-            // Click to paste into reply
             item.querySelector('.item-text').addEventListener('click', () => {
                 if (replyInput) {
                     replyInput.value = t.content;
                     replyInput.focus();
-                    showToast('Template loaded', 'info');
+                    showToast('Template dimuat ke input', 'info');
                 }
             });
             item.querySelector('.btn-delete-item').addEventListener('click', async () => {
                 await apiFetch(`/api/templates/${t.id}`, { method: 'DELETE' });
                 fetchTemplates();
-                showToast('Template deleted', 'success');
+                showToast('Template dihapus', 'success');
             });
             templatesList.appendChild(item);
         });
@@ -599,7 +698,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
         tplName.value = ''; tplContent.value = '';
         fetchTemplates();
-        showToast('Template added', 'success');
+        showToast('Template ditambahkan ✅', 'success');
     });
 
     // ===== Auto-Replies =====
@@ -613,7 +712,7 @@ document.addEventListener('DOMContentLoaded', function () {
     function renderAutoReplies(rules) {
         autoRepliesList.innerHTML = '';
         if (!rules || rules.length === 0) {
-            autoRepliesList.innerHTML = '<div style="padding: 6px; color: var(--text-secondary); font-size: 0.75rem;">No rules</div>';
+            autoRepliesList.innerHTML = '<div style="padding: 10px; color: var(--text-muted); font-size: 0.78rem; text-align: center;"><i class="bi bi-reply"></i> Belum ada aturan</div>';
             return;
         }
         rules.forEach(r => {
@@ -624,12 +723,12 @@ document.addEventListener('DOMContentLoaded', function () {
                     <div class="item-keyword">"${r.keyword}"</div>
                     <div class="item-response">→ ${r.response.substring(0, 40)}${r.response.length > 40 ? '...' : ''}</div>
                 </div>
-                <button class="btn-delete-item" data-id="${r.id}"><i class="bi bi-trash3"></i></button>
+                <button class="btn-delete-item" data-id="${r.id}" title="Hapus"><i class="bi bi-trash3"></i></button>
             `;
             item.querySelector('.btn-delete-item').addEventListener('click', async () => {
                 await apiFetch(`/api/auto-replies/${r.id}`, { method: 'DELETE' });
                 fetchAutoReplies();
-                showToast('Rule deleted', 'success');
+                showToast('Aturan dihapus', 'success');
             });
             autoRepliesList.appendChild(item);
         });
@@ -646,7 +745,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
         arKeyword.value = ''; arResponse.value = '';
         fetchAutoReplies();
-        showToast('Auto-reply added', 'success');
+        showToast('Auto-reply ditambahkan ✅', 'success');
     });
 
     // ===== WebSocket =====
@@ -661,17 +760,21 @@ document.addEventListener('DOMContentLoaded', function () {
                 handleIncomingMessage(msg.data);
             } else if (msg.type === 'new_conversation') {
                 updateConversationList(msg.data.chat_id);
-                showToast(`New conversation: ${msg.data.chat_id}`, 'info');
-                // Browser notification
+                showToast(`Chat baru: ${formatPhoneNumber(msg.data.chat_id)}`, 'info');
                 if (Notification.permission === 'granted') {
-                    new Notification('Khumaira AI', { body: `New conversation from ${msg.data.chat_id}` });
+                    new Notification('Khumaira AI', { body: `Chat baru dari ${formatPhoneNumber(msg.data.chat_id)}`, icon: '/static/favicon.png' });
                 }
             } else if (msg.type === 'conversation_deleted') {
                 allChats = allChats.filter(c => (c.id || c) !== msg.data.chat_id);
                 renderConversationList(allChats);
                 if (activeChatId === msg.data.chat_id) {
                     activeChatId = null;
-                    chatWindow.innerHTML = '<div class="empty-state"><i class="bi bi-chat-square-text" style="font-size: 4rem;"></i><p>Chat deleted</p></div>';
+                    chatWindow.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon"><i class="bi bi-trash3"></i></div>
+                            <h3>Chat Dihapus</h3>
+                            <p>Pilih percakapan lain di sidebar</p>
+                        </div>`;
                 }
             }
         };
@@ -694,18 +797,22 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (!item.querySelector('.chat-badge')) {
                     const badgeSpan = document.createElement('span');
                     badgeSpan.className = 'chat-badge';
-                    badgeSpan.textContent = 'New';
-                    item.appendChild(badgeSpan);
+                    badgeSpan.textContent = 'Baru';
+                    const metaDiv = item.querySelector('.chat-meta');
+                    if (metaDiv) {
+                        metaDiv.prepend(badgeSpan);
+                    } else {
+                        item.appendChild(badgeSpan);
+                    }
                 }
                 conversationsList.prepend(item);
             } else {
                 updateConversationList(chat_id);
             }
 
-            // Browser notification for new messages
             if (Notification.permission === 'granted' && message.user) {
-                const text = message.user.parts?.find(p => p.text)?.text || 'New message';
-                new Notification('Khumaira AI', { body: `${chat_id}: ${text.substring(0, 100)}` });
+                const text = message.user.parts?.find(p => p.text)?.text || 'Pesan baru';
+                new Notification('Khumaira AI', { body: `${formatPhoneNumber(chat_id)}: ${text.substring(0, 100)}` });
             }
         }
     }

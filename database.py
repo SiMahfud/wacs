@@ -14,10 +14,10 @@ class DatabaseError(Exception):
 async def run_migrations(db_pool):
     """Runs database schema migrations on startup."""
     migrations = [
-        # Add created_at to chat_history
-        """ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP""",
+        # Add created_at to chat_history (1060 = duplicate column, silently ignored)
+        """ALTER TABLE chat_history ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP""",
         # Add label to conversation_control
-        """ALTER TABLE conversation_control ADD COLUMN IF NOT EXISTS label VARCHAR(50) DEFAULT NULL""",
+        """ALTER TABLE conversation_control ADD COLUMN label VARCHAR(50) DEFAULT NULL""",
         # Audit log table
         """CREATE TABLE IF NOT EXISTS audit_log (
             id INT AUTO_INCREMENT PRIMARY KEY,
