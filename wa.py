@@ -335,15 +335,25 @@ async def admin_dashboard(request):
 async def get_conversations(request):
     global db_pool
     try:
-        chat_ids = await database.get_all_chat_ids(db_pool)
-        # Get labels for each chat
-        result = []
-        for cid in chat_ids:
-            label = await database.get_chat_label(db_pool, cid)
-            result.append({'id': cid, 'label': label})
+        async with db_pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                query = """
+                    SELECT ch.chat_id, cc.label, MAX(ch.created_at) as last_msg
+                    FROM chat_history ch
+                    LEFT JOIN conversation_control cc ON ch.chat_id = cc.chat_id
+                    GROUP BY ch.chat_id
+                    ORDER BY last_msg DESC
+                """
+                await cursor.execute(query)
+                results = await cursor.fetchall()
+        
+        result = [{'id': row[0], 'label': row[1]} for row in results]
         return web.json_response(result)
     except database.DatabaseError as e:
         return web.json_response({'error': str(e)}, status=500)
+    except Exception as e:
+        logging.exception("Error fetching conversations:")
+        return web.json_response({'error': 'Internal server error'}, status=500)
 
 @require_auth
 async def get_conversation_history(request):

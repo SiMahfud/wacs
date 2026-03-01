@@ -218,7 +218,12 @@ async def get_all_chat_ids(db_pool) -> Optional[List[str]]:
     try:
         async with db_pool.acquire() as conn:
             async with conn.cursor() as cursor:
-                query = "SELECT DISTINCT chat_id FROM chat_history ORDER BY chat_id ASC"
+                query = """
+                    SELECT chat_id 
+                    FROM chat_history 
+                    GROUP BY chat_id 
+                    ORDER BY MAX(created_at) DESC
+                """
                 await cursor.execute(query)
                 results = await cursor.fetchall()
         return [row[0] for row in results] if results else []

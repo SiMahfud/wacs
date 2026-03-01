@@ -2,7 +2,11 @@ document.addEventListener('DOMContentLoaded', function () {
     // ===== DOM Elements =====
     const sidebar = document.getElementById('sidebar');
     const sidebarOverlay = document.getElementById('sidebar-overlay');
+    const infoOverlay = document.getElementById('info-overlay');
     const btnHamburger = document.getElementById('btn-hamburger');
+    const btnInfo = document.getElementById('btn-info');
+    const btnInfoSidebar = document.getElementById('btn-info-sidebar');
+    const infoPanel = document.getElementById('info-panel');
     const conversationsList = document.getElementById('conversations-list');
     const searchInput = document.getElementById('search-input');
     const chatWindow = document.getElementById('chat-window');
@@ -97,8 +101,32 @@ document.addEventListener('DOMContentLoaded', function () {
         btnHamburger.addEventListener('click', () => {
             sidebar.classList.toggle('open');
             sidebarOverlay.classList.toggle('open');
+            // Close info if open
+            if (infoPanel) infoPanel.classList.remove('open');
+            if (infoOverlay) infoOverlay.classList.remove('open');
         });
     }
+
+    if (btnInfo) {
+        btnInfo.addEventListener('click', () => {
+            infoPanel.classList.toggle('open');
+            infoOverlay.classList.toggle('open');
+            // Close sidebar if open
+            if (sidebar) sidebar.classList.remove('open');
+            if (sidebarOverlay) sidebarOverlay.classList.remove('open');
+        });
+    }
+
+    if (btnInfoSidebar) {
+        btnInfoSidebar.addEventListener('click', () => {
+            infoPanel.classList.toggle('open');
+            infoOverlay.classList.toggle('open');
+            // Close sidebar if open
+            if (sidebar) sidebar.classList.remove('open');
+            if (sidebarOverlay) sidebarOverlay.classList.remove('open');
+        });
+    }
+
     if (sidebarOverlay) {
         sidebarOverlay.addEventListener('click', () => {
             sidebar.classList.remove('open');
@@ -106,10 +134,19 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    if (infoOverlay) {
+        infoOverlay.addEventListener('click', () => {
+            infoPanel.classList.remove('open');
+            infoOverlay.classList.remove('open');
+        });
+    }
+
     function closeMobileSidebar() {
-        if (window.innerWidth <= 768) {
-            sidebar.classList.remove('open');
-            sidebarOverlay.classList.remove('open');
+        if (window.innerWidth <= 1100) {
+            if (sidebar) sidebar.classList.remove('open');
+            if (sidebarOverlay) sidebarOverlay.classList.remove('open');
+            if (infoPanel) infoPanel.classList.remove('open');
+            if (infoOverlay) infoOverlay.classList.remove('open');
         }
     }
 

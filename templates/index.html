@@ -24,8 +24,9 @@
         </div>
     </div>
 
-    <!-- Mobile sidebar overlay -->
+    <!-- Mobile overlays -->
     <div id="sidebar-overlay" class="sidebar-overlay"></div>
+    <div id="info-overlay" class="sidebar-overlay"></div>
 
     <div class="layout-container">
         <!-- 1. Sidebar: Conversations -->
@@ -33,8 +34,12 @@
             <div class="sidebar-header">
                 <div class="sidebar-title-row">
                     <h4 style="margin: 0; color: white;"><span class="online-dot"></span> Conversations</h4>
-                    <button id="btn-logout" class="btn-icon" title="Logout"><i
-                            class="bi bi-box-arrow-right"></i></button>
+                    <div style="display: flex; gap: 5px; align-items: center;">
+                        <button id="btn-info-sidebar" class="btn-icon mobile-only-btn" title="Stats/Tools"><i
+                                class="bi bi-grid-3x3-gap"></i></button>
+                        <button id="btn-logout" class="btn-icon" title="Logout"><i
+                                class="bi bi-box-arrow-right"></i></button>
+                    </div>
                 </div>
                 <input type="text" id="search-input" class="search-box" placeholder="Cari nama atau nomor...">
             </div>
@@ -62,6 +67,8 @@
                     <button id="btn-label" class="btn-icon" title="Set Label"><i class="bi bi-tag"></i></button>
                     <button id="btn-delete-chat" class="btn-icon btn-danger-icon" title="Delete Chat"><i
                             class="bi bi-trash3"></i></button>
+                    <div class="control-divider"></div>
+                    <button id="btn-info" class="btn-icon" title="Show Info"><i class="bi bi-info-circle"></i></button>
                     <div class="control-divider"></div>
                     <span class="info-label">AI</span>
                     <label class="switch">
@@ -100,8 +107,8 @@
             </div>
         </div>
 
-        <!-- 3. Right Panel: Tabs -->
-        <div class="info-panel glass-panel">
+        <!-- 3. Right Panel: Info & Tools -->
+        <div id="info-panel" class="info-panel glass-panel">
             <div class="tab-bar">
                 <button class="tab-btn active" data-tab="overview"><i class="bi bi-grid"></i> Overview</button>
                 <button class="tab-btn" data-tab="tools"><i class="bi bi-tools"></i> Tools</button>
