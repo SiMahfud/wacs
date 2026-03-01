@@ -6,7 +6,7 @@ from typing import Dict
 import pyautogui
 from google.genai import types
 
-from database import execute_sql_query, DatabaseError
+from database import execute_sql_query, save_audit_log, DatabaseError
 from utils import _create_error_response
 
 google_search_tool = types.Tool(
@@ -101,13 +101,13 @@ db_insert_tool = types.FunctionDeclaration(
 
 cctv_tool = types.FunctionDeclaration(
     name="cctv_tool",
-    description="Gunakan tool ini untuk merestart cctv.",
+    description="Gunakan tool ini untuk merestart atau menghentikan cctv.",
     parameters=types.Schema(
         type="OBJECT",
         properties={
             "command": types.Schema(
                 type="STRING",
-                description="Command untuk restart cctv",
+                description="Command untuk cctv: restart atau stop",
                 enum=["restart", "stop"]
             )
         },
@@ -139,17 +139,45 @@ extra_tools = types.Tool(
     function_declarations=[cctv_tool, ss_tool],
 )
 
+# --- Column Whitelists ---
+GUKAR_ALLOWED_COLS = [
+    "nama", "gender", "golongan", "nip", "tempat_lahir", "tanggal_lahir",
+    "pendidikan_terakhir", "tahun_lulus", "bidang_studi", "mengajar",
+    "agama", "no_hp", "email", "desa", "alamat"
+]
+
+SISWA_ALLOWED_COLS = [
+    "nama", "jk", "nisn", "nipd", "rombel_saat_ini", "tempat_lahir",
+    "tanggal_lahir", "agama", "alamat", "no_hp", "email",
+    "no_seri_ijazah", "tahun_lulus", "sekolah_asal"
+]
+
+GUKAR_UPDATE_ALLOWED_COLS = [
+    "nama", "gender", "golongan", "nip", "tempat_lahir", "tanggal_lahir",
+    "pendidikan_terakhir", "tahun_lulus", "bidang_studi", "mengajar",
+    "agama", "no_hp", "email", "desa", "alamat"
+]
+
+SISWA_UPDATE_ALLOWED_COLS = [
+    "nama", "jk", "nisn", "nipd", "rombel_saat_ini", "tempat_lahir",
+    "tanggal_lahir", "agama", "alamat", "no_hp", "email",
+    "no_seri_ijazah", "tahun_lulus", "sekolah_asal"
+]
+
+ALLOWED_COLUMNS = {
+    "gukar": {"select": GUKAR_ALLOWED_COLS, "update": GUKAR_UPDATE_ALLOWED_COLS},
+    "siswa": {"select": SISWA_ALLOWED_COLS, "update": SISWA_UPDATE_ALLOWED_COLS},
+}
+
+
 async def _handle_db_gukar_tool(args: Dict, db_pool) -> types.Part:
     tool_name = "db_gukar_tool"
     search_term = args.get("search_term")
     cols = args.get("columns", ["nama", "nip", "mengajar"])
     
-    # Whitelist columns to prevent injection via column names
-    allowed_cols = ["nama", "gender", "golongan", "nip", "tempat_lahir", "tanggal_lahir", 
-                    "pendidikan_terakhir", "tahun_lulus", "bidang_studi", "mengajar", 
-                    "agama", "no_hp", "email", "desa", "alamat"]
-    safe_cols = [c for c in cols if c in allowed_cols]
-    if not safe_cols: safe_cols = ["nama", "nip", "mengajar"]
+    safe_cols = [c for c in cols if c in GUKAR_ALLOWED_COLS]
+    if not safe_cols:
+        safe_cols = ["nama", "nip", "mengajar"]
     
     col_str = ", ".join([f"`{c}`" for c in safe_cols])
     sql_query = f"SELECT {col_str} FROM `gukar` WHERE `nama` LIKE %s OR `nip` = %s OR `mengajar` LIKE %s"
@@ -212,8 +240,17 @@ async def _handle_db_update_tool(args: Dict, db_pool) -> types.Part:
     if not all([table_name, updates, where_clause]):
         return _create_error_response(tool_name, "Missing required arguments")
     
-    if table_name not in ["siswa", "gukar"]:
+    if table_name not in ALLOWED_COLUMNS:
         return _create_error_response(tool_name, "Table not allowed.")
+
+    # Validate column names against whitelist
+    allowed = ALLOWED_COLUMNS[table_name]["update"]
+    for col in updates.keys():
+        if col not in allowed:
+            return _create_error_response(tool_name, f"Column '{col}' is not allowed for update on table '{table_name}'.")
+    for col in where_clause.keys():
+        if col not in allowed:
+            return _create_error_response(tool_name, f"Column '{col}' is not allowed in WHERE clause for table '{table_name}'.")
 
     set_parts = []
     params = []
@@ -229,6 +266,8 @@ async def _handle_db_update_tool(args: Dict, db_pool) -> types.Part:
     sql_query = f"UPDATE `{table_name}` SET {', '.join(set_parts)} WHERE {' AND '.join(where_parts)}"
     try:
         query_result = await execute_sql_query(db_pool, sql_query, params=tuple(params))
+        # Audit log
+        await save_audit_log(db_pool, table_name, "UPDATE", details=f"SET {updates} WHERE {where_clause}")
         return types.Part.from_function_response(
             name=tool_name,
             response={'result': str(query_result)},
@@ -244,8 +283,14 @@ async def _handle_db_insert_tool(args: Dict, db_pool) -> types.Part:
     if not all([table_name, data]):
         return _create_error_response(tool_name, "Missing required arguments")
     
-    if table_name not in ["siswa", "gukar"]:
+    if table_name not in ALLOWED_COLUMNS:
         return _create_error_response(tool_name, "Table not allowed.")
+
+    # Validate column names against whitelist
+    allowed = ALLOWED_COLUMNS[table_name]["update"]
+    for col in data.keys():
+        if col not in allowed:
+            return _create_error_response(tool_name, f"Column '{col}' is not allowed for insert on table '{table_name}'.")
 
     cols = data.keys()
     vals = data.values()
@@ -255,6 +300,8 @@ async def _handle_db_insert_tool(args: Dict, db_pool) -> types.Part:
     sql_query = f"INSERT INTO `{table_name}` ({column_str}) VALUES ({placeholders})"
     try:
         query_result = await execute_sql_query(db_pool, sql_query, params=tuple(vals))
+        # Audit log
+        await save_audit_log(db_pool, table_name, "INSERT", details=f"DATA {data}")
         return types.Part.from_function_response(
             name=tool_name,
             response={'result': str(query_result)}
@@ -263,9 +310,19 @@ async def _handle_db_insert_tool(args: Dict, db_pool) -> types.Part:
         return _create_error_response(tool_name, f"Error executing database operation: {e}")
 
 async def _handle_cctv_tool(args: Dict) -> types.Part:
+    """Handles CCTV restart or stop based on the command argument."""
+    command = args.get("command", "restart")
+    
+    if command == "stop":
+        pm2_cmd = 'pm2 stop "Super Simpel NVR"'
+        success_msg = "Proses 'Super Simpel NVR' berhasil dihentikan."
+    else:
+        pm2_cmd = 'pm2 restart "Super Simpel NVR"'
+        success_msg = "Proses 'Super Simpel NVR' berhasil direstart."
+    
     try:
         process = await asyncio.create_subprocess_shell(
-            'pm2 restart "Super Simpel NVR"',
+            pm2_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -273,10 +330,10 @@ async def _handle_cctv_tool(args: Dict) -> types.Part:
         if process.returncode == 0:
             return types.Part.from_function_response(
                 name="cctv_tool",
-                response={"result": "Proses 'Super Simpel NVR' berhasil direstart."},
+                response={"result": success_msg},
             )
         else:
-            error_message = f"Error restarting 'Super Simpel NVR': {stderr.decode()}"
+            error_message = f"Error executing '{command}' on 'Super Simpel NVR': {stderr.decode()}"
             return _create_error_response("cctv_tool", error_message)
     except Exception as e:
         return _create_error_response("cctv_tool", f"An unexpected error occurred: {e}")

@@ -15,12 +15,7 @@ def content_to_dict(content: types.Content) -> dict:
             content_dict["parts"].append({"type": "FileData", "file_uri": part.file_data.file_uri, "mime_type": part.file_data.mime_type})
         elif part.function_call:
            args = part.function_call.args
-           if isinstance(args, str):
-             args = args.replace("\\", "")
-           elif isinstance(args, dict):
-            for key, value in args.items():
-                if isinstance(value, str):
-                    args[key] = value.replace("\\", "")
+           # Preserve args as-is without stripping backslashes
            content_dict["parts"].append({"type": "function_call", "name": part.function_call.name, "arguments": args})
         elif part.function_response:
             content_dict["parts"].append({"type": "function_response", "name": part.function_response.name, "response": part.function_response.response})
@@ -35,6 +30,7 @@ def _create_parts_from_dict(parts_list: List[Dict]) -> List[types.Part]:
         types.Part.from_function_call(name=part['name'], args=part['arguments']) if part['type'] == 'function_call' else
         types.Part.from_function_response(name=part['name'], response=part['response'])
         for part in parts_list
+        if part.get('type')  # Skip parts without a type (e.g. local_media)
     ]
 
 def _create_error_response(tool_name: str, message: str) -> types.Part:

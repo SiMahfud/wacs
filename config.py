@@ -4,10 +4,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # WhatsApp API Credentials
-WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID") # Your WhatsApp Business Phone Number ID
-WHATSAPP_BEARER_TOKEN = os.getenv("WHATSAPP_BEARER_TOKEN") # Your WhatsApp Bearer Token
-WHATSAPP_API_VERSION = os.getenv("WHATSAPP_API_VERSION", "v22.0") # WhatsApp API version
-WHATSAPP_VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN")  # Your Verify Token
+WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+WHATSAPP_BEARER_TOKEN = os.getenv("WHATSAPP_BEARER_TOKEN")
+WHATSAPP_API_VERSION = os.getenv("WHATSAPP_API_VERSION", "v22.0")
+WHATSAPP_VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN")
 
 # Google API Credentials
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -29,5 +29,23 @@ MYSQL_USER = os.getenv("MYSQL_USER")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
 MYSQL_DATABASE = os.getenv("MYSQL_DATABASE")
 
+# Admin Dashboard Auth
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+SESSION_SECRET = os.getenv("SESSION_SECRET", "default_secret_change_me")
+
+# Rate Limiting
+RATE_LIMIT_MAX = int(os.getenv("RATE_LIMIT_MAX", "20"))
+RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "60"))
+
 # Constants
 WHATSAPP_API_URL = "https://graph.facebook.com"
+
+def get_whatsapp_config():
+    """Returns only the WhatsApp-related config needed for API calls."""
+    return {
+        "WHATSAPP_BEARER_TOKEN": WHATSAPP_BEARER_TOKEN,
+        "WHATSAPP_API_URL": WHATSAPP_API_URL,
+        "WHATSAPP_API_VERSION": WHATSAPP_API_VERSION,
+        "WHATSAPP_PHONE_NUMBER_ID": WHATSAPP_PHONE_NUMBER_ID,
+    }
