@@ -11,22 +11,28 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
     <link rel="stylesheet" href="/static/style.css">
     <style>
+        html,
         body {
             overflow: auto !important;
-            /* Force scroll */
+            height: auto !important;
             min-height: 100vh;
+        }
+
+        body {
             padding: 2rem 1rem;
             display: flex;
             justify-content: center;
             background-attachment: fixed;
+            background-image: var(--bg-gradient);
+            background-color: var(--bg-color);
         }
 
         .settings-container {
             width: 100%;
             max-width: 900px;
             animation: fadeIn 0.5s ease-out;
-            padding-bottom: 50px;
-            /* Space at bottom */
+            padding-bottom: 120px;
+            /* Extra space at bottom to ensure visibility */
         }
 
         .glass-card {
@@ -314,6 +320,8 @@
                         <i class="bi bi-save"></i> Simpan Konfigurasi
                     </button>
                 </div>
+                <!-- Extra spacer for bottom content -->
+                <div style="height: 20px;"></div>
             </form>
         </div>
     </div>
