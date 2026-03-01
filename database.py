@@ -50,6 +50,19 @@ async def run_migrations(db_pool):
             status VARCHAR(20) DEFAULT 'pending',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+        # AI settings table
+        """CREATE TABLE IF NOT EXISTS ai_settings (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            provider VARCHAR(50) NOT NULL DEFAULT 'gemini',
+            model_name VARCHAR(100) DEFAULT NULL,
+            api_key VARCHAR(255) DEFAULT NULL,
+            system_prompt TEXT DEFAULT NULL,
+            is_active TINYINT(1) DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+        # Default Gemini setting
+        """INSERT IGNORE INTO ai_settings (provider, model_name, is_active) VALUES ('gemini', 'gemini-1.5-flash', 1)""",
     ]
     try:
         async with db_pool.acquire() as conn:
@@ -577,3 +590,80 @@ async def delete_conversation(db_pool, chat_id: str):
     except aiomysql.Error as err:
         logging.error(f"Error deleting conversation: {err}")
         raise DatabaseError(f"Error deleting conversation: {err}")
+
+# --- AI Settings ---
+async def get_ai_settings(db_pool) -> List[dict]:
+    """Get all AI configured providers and their settings."""
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute("SELECT * FROM ai_settings ORDER BY id ASC")
+                return await cursor.fetchall()
+    except aiomysql.Error as err:
+        logging.error(f"Error getting AI settings: {err}")
+        raise DatabaseError(f"Error getting AI settings: {err}")
+
+async def get_active_ai_setting(db_pool) -> Optional[dict]:
+    """Get the currently active AI provider setting."""
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute("SELECT * FROM ai_settings WHERE is_active = 1 LIMIT 1")
+                return await cursor.fetchone()
+    except aiomysql.Error as err:
+        logging.error(f"Error getting active AI setting: {err}")
+        raise DatabaseError(f"Error getting active AI setting: {err}")
+
+async def save_ai_setting(db_pool, provider: str, model_name: str, api_key: str = None, system_prompt: str = None, is_active: bool = False, setting_id: int = None):
+    """Save or update an AI provider setting."""
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                if is_active:
+                    # Deactivate others if this one is active
+                    await cursor.execute("UPDATE ai_settings SET is_active = 0")
+                
+                if setting_id:
+                    # Update existing
+                    query = """
+                        UPDATE ai_settings 
+                        SET provider = %s, model_name = %s, api_key = COALESCE(%s, api_key), 
+                            system_prompt = %s, is_active = %s
+                        WHERE id = %s
+                    """
+                    await cursor.execute(query, (provider, model_name, api_key, system_prompt, 1 if is_active else 0, setting_id))
+                else:
+                    # Insert new
+                    query = """
+                        INSERT INTO ai_settings (provider, model_name, api_key, system_prompt, is_active)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """
+                    await cursor.execute(query, (provider, model_name, api_key, system_prompt, 1 if is_active else 0))
+                
+                await conn.commit()
+    except aiomysql.Error as err:
+        logging.error(f"Error saving AI setting: {err}")
+        raise DatabaseError(f"Error saving AI setting: {err}")
+
+async def delete_ai_setting(db_pool, setting_id: int):
+    """Delete an AI provider setting."""
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("DELETE FROM ai_settings WHERE id = %s", (setting_id,))
+                await conn.commit()
+    except aiomysql.Error as err:
+        logging.error(f"Error deleting AI setting: {err}")
+        raise DatabaseError(f"Error deleting AI setting: {err}")
+
+async def set_active_ai_provider(db_pool, provider_id: int):
+    """Set a specific AI provider as active."""
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("UPDATE ai_settings SET is_active = 0")
+                await cursor.execute("UPDATE ai_settings SET is_active = 1 WHERE id = %s", (provider_id,))
+                await conn.commit()
+    except aiomysql.Error as err:
+        logging.error(f"Error setting active AI provider: {err}")
+        raise DatabaseError(f"Error setting active AI provider: {err}")

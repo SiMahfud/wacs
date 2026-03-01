@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Settings - Khumaira Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body {
+            overflow: auto !important;
+            /* Force scroll */
+            min-height: 100vh;
+            padding: 2rem 1rem;
+            display: flex;
+            justify-content: center;
+            background-attachment: fixed;
+        }
+
+        .settings-container {
+            width: 100%;
+            max-width: 900px;
+            animation: fadeIn 0.5s ease-out;
+            padding-bottom: 50px;
+            /* Space at bottom */
+        }
+
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(var(--blur-strength));
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        }
+
+        .header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .header-row h1 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin: 0;
+            background: linear-gradient(135deg, #fff, var(--text-secondary));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .provider-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+            margin-bottom: 32px;
+        }
+
+        .provider-item {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            padding: 20px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .provider-item:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: var(--glass-border-hover);
+            transform: translateY(-2px);
+        }
+
+        .provider-item.active {
+            border-color: var(--accent-color);
+            background: rgba(59, 130, 246, 0.08);
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.15);
+        }
+
+        .provider-item.active::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 40px;
+            height: 40px;
+            background: var(--accent-color);
+            clip-path: polygon(100% 0, 0 0, 100% 100%);
+            opacity: 0.8;
+        }
+
+        .provider-icon {
+            font-size: 1.5rem;
+            color: var(--accent-color);
+            margin-bottom: 12px;
+        }
+
+        .provider-name {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+            display: block;
+        }
+
+        .provider-model {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            font-family: 'JetBrains Mono', monospace;
+            display: block;
+            margin-bottom: 12px;
+        }
+
+        .provider-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: auto;
+            padding-top: 16px;
+        }
+
+        .form-section-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text-primary);
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--glass-border);
+            border-radius: 10px;
+            color: var(--text-primary);
+            padding: 12px 14px;
+            font-size: 0.9rem;
+            outline: none;
+            transition: all 0.2s;
+            box-sizing: border-box;
+        }
+
+        .btn-loading {
+            position: relative;
+            color: transparent !important;
+        }
+
+        .btn-loading::after {
+            content: "";
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            top: 50%;
+            left: 50%;
+            margin-top: -8px;
+            margin-left: -8px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .btn-danger-outline {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        .btn-danger-outline:hover {
+            background: rgba(239, 68, 68, 0.2);
+            border-color: rgba(239, 68, 68, 0.4);
+        }
+
+        .btn-edit {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            color: var(--text-primary);
+        }
+
+        .btn-edit:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .status-badge {
+            font-size: 0.65rem;
+            padding: 2px 8px;
+            border-radius: 20px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .status-active {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            width: 100%;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            gap: 6px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="settings-container">
+        <div class="header-row">
+            <h1><i class="bi bi-cpu"></i> Pengaturan AI</h1>
+            <a href="/admin" class="btn btn-icon" title="Kembali ke Dashboard">
+                <i class="bi bi-x-lg" style="font-size: 1.5rem;"></i>
+            </a>
+        </div>
+
+        <div class="form-section-title">
+            <i class="bi bi-hdd-stack"></i> Provider Terdaftar
+        </div>
+
+        <div id="providers-list" class="provider-grid">
+            <!-- Providers will be loaded here -->
+        </div>
+
+        <div class="glass-card">
+            <div class="form-section-title">
+                <i class="bi bi-plus-circle"></i> <span id="form-mode-text">Tambah / Update Configuration</span>
+            </div>
+            <form id="new-provider-form">
+                <input type="hidden" name="id" id="setting-id">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="form-group">
+                        <label>AI Provider Source</label>
+                        <select name="provider" id="f-provider" required>
+                            <option value="gemini">Google Gemini</option>
+                            <option value="openrouter">OpenRouter</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="claude">Anthropic Claude</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Model Name ID</label>
+                        <input type="text" name="model_name" id="f-model" placeholder="misal: gemini-1.5-flash"
+                            required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="password" name="api_key" id="f-api_key" placeholder="••••••••••••••••••••">
+                    <small style="color: var(--text-muted); font-size: 0.7rem; margin-top: 4px; display: block;">
+                        *Kosongkan untuk tetap menggunakan key yang sudah ada (atau default env)
+                    </small>
+                </div>
+
+                <div class="form-group">
+                    <label>Custom System Prompt</label>
+                    <textarea name="system_prompt" id="f-prompt" rows="4"
+                        placeholder="Instruksi khusus untuk model ini..."></textarea>
+                </div>
+
+                <div class="form-group" style="margin-top: 1.5rem;">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" name="is_active" id="f-active" style="width: 18px; height: 18px;">
+                        <span>Jadikan sebagai provider aktif utama</span>
+                    </label>
+                </div>
+
+                <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 2rem;">
+                    <button type="button" onclick="resetForm()" class="btn btn-edit" style="padding: 12px 24px;">Reset /
+                        Batal</button>
+                    <button type="submit" id="btn-save" class="btn btn-primary" style="padding: 12px 24px;">
+                        <i class="bi bi-save"></i> Simpan Konfigurasi
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const providersList = document.getElementById('providers-list');
+        const saveForm = document.getElementById('new-provider-form');
+        const saveBtn = document.getElementById('btn-save');
+        let currentSettings = [];
+
+        async function loadSettings() {
+            try {
+                const res = await fetch('/api/ai-settings');
+                currentSettings = await res.json();
+
+                providersList.innerHTML = '';
+
+                if (currentSettings.length === 0) {
+                    providersList.innerHTML = `<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: var(--text-muted);">Belum ada konfigurasi.</div>`;
+                    return;
+                }
+
+                currentSettings.forEach(s => {
+                    const card = document.createElement('div');
+                    card.className = `provider-item ${s.is_active ? 'active' : ''}`;
+
+                    let iconClass = 'bi-robot';
+                    if (s.provider === 'gemini') iconClass = 'bi-google';
+                    if (s.provider === 'openai' || s.provider === 'openrouter') iconClass = 'bi-lightning-charge';
+                    if (s.provider === 'claude') iconClass = 'bi-shield-check';
+
+                    card.innerHTML = `
+                        <div class="provider-icon"><i class="bi ${iconClass}"></i></div>
+                        <span class="provider-name">${s.provider.toUpperCase()}</span>
+                        <span class="provider-model">${s.model_name || 'Default'}</span>
+                        
+                        <div style="flex: 1; min-height: 48px; font-size: 0.75rem; color: var(--text-muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;">
+                            ${s.system_prompt || 'Global default system prompt...'}
+                        </div>
+
+                        <div class="provider-actions">
+                            ${!s.is_active ? `<button onclick="activateProvider(${s.id}, this)" class="btn btn-sm btn-primary" title="Aktifkan"><i class="bi bi-power"></i></button>` : `<span class="status-badge status-active"><i class="bi bi-check-circle"></i></span>`}
+                            <button onclick="editProvider(${s.id})" class="btn btn-sm btn-edit" title="Edit"><i class="bi bi-pencil-square"></i></button>
+                            ${!s.is_active ? `<button onclick="deleteProvider(${s.id}, this)" class="btn btn-sm btn-danger-outline" title="Hapus"><i class="bi bi-trash"></i></button>` : ''}
+                        </div>
+                    `;
+                    providersList.appendChild(card);
+                });
+            } catch (err) { console.error(err); }
+        }
+
+        function editProvider(id) {
+            const s = currentSettings.find(x => x.id === id);
+            if (!s) return;
+            document.getElementById('setting-id').value = s.id;
+            document.getElementById('f-provider').value = s.provider;
+            document.getElementById('f-model').value = s.model_name;
+            document.getElementById('f-api_key').value = ''; // Always clear API key for security
+            document.getElementById('f-prompt').value = s.system_prompt || '';
+            document.getElementById('f-active').checked = s.is_active;
+            document.getElementById('form-mode-text').innerText = 'Edit Konfigurasi Provider';
+            document.getElementById('new-provider-form').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function resetForm() {
+            saveForm.reset();
+            document.getElementById('setting-id').value = '';
+            document.getElementById('form-mode-text').innerText = 'Tambah / Update Configuration';
+        }
+
+        async function deleteProvider(id, btn) {
+            if (!confirm('Hapus konfigurasi ini?')) return;
+            btn.classList.add('btn-loading');
+            try {
+                const res = await fetch(`/api/ai-settings/${id}`, { method: 'DELETE' });
+                if (res.ok) await loadSettings();
+                else alert('Gagal menghapus.');
+            } catch (err) { alert('Kesalahan jaringan.'); }
+            finally { btn.classList.remove('btn-loading'); }
+        }
+
+        async function activateProvider(id, btn) {
+            btn.classList.add('btn-loading');
+            try {
+                const res = await fetch('/api/ai-settings/activate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id })
+                });
+                if (res.ok) await loadSettings();
+            } catch (err) { console.error(err); }
+            finally { btn.classList.remove('btn-loading'); }
+        }
+
+        saveForm.onsubmit = async (e) => {
+            e.preventDefault();
+            saveBtn.classList.add('btn-loading');
+            const data = Object.fromEntries(new FormData(e.target).entries());
+            data.is_active = document.getElementById('f-active').checked;
+            if (!data.id) delete data.id;
+
+            try {
+                const res = await fetch('/api/ai-settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                if (res.ok) {
+                    resetForm();
+                    await loadSettings();
+                } else {
+                    const err = await res.json();
+                    alert('Error: ' + err.error);
+                }
+            } catch (err) { alert('Gagal menghubungi server.'); }
+            finally { saveBtn.classList.remove('btn-loading'); }
+        };
+
+        loadSettings();
+    </script>
+</body>
+
+</html>

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import json
 import os
+from datetime import datetime
 import time
 import csv
 import io
@@ -21,12 +22,11 @@ import database
 import tools
 import whatsapp_service
 from utils import content_to_dict
-
-# Konfigurasi library dan inisialisasi Klien
-client = genai.Client(api_key=config.GOOGLE_API_KEY)
+from ai_service import AIService
 
 # --- Variabel Global ---
 db_pool = None
+ai_service = None
 logging.basicConfig(level=logging.INFO)
 BASE_DIR = pathlib.Path(__file__).parent
 TEMPLATES_DIR = BASE_DIR / 'templates'
@@ -67,29 +67,32 @@ def check_auth(request) -> bool:
     return session.get('authenticated', False)
 
 # --- Logika Inti Bot ---
-async def generate_gemini_response(content: types.Content, chat_id: str, app: web.Application, user_message_dict: dict, chat_history: Optional[List[types.Content]] = None):
-    """Generates a Gemini response and handles potential tool calls."""
-    global db_pool
+async def generate_ai_response(content: types.Content, chat_id: str, app: web.Application, user_message_dict: dict, chat_history: Optional[List[types.Content]] = None):
+    """Generates an AI response and handles potential tool calls."""
+    global db_pool, ai_service
     wa_config = config.get_whatsapp_config()
+    
+    # Initialize ai_service if not already done
+    if ai_service is None:
+        active_setting = await database.get_active_ai_setting(db_pool)
+        ai_service = AIService(active_setting)
+
     try:
         contents = chat_history + [content] if chat_history else [content]
         
-        response = client.models.generate_content(
-            model=config.GOOGLE_MODEL,
+        # Determine if we should use tools
+        active_setting = await database.get_active_ai_setting(db_pool)
+        # Tools supported by Gemini, OpenRouter, and OpenAI
+        provider_name = active_setting.get('provider') if active_setting else 'gemini'
+        tools_supported = provider_name in ['gemini', 'openrouter', 'openai']
+        
+        provider_tools = [tools.db_tool, tools.extra_tools] if tools_supported else None
+        system_prompt = active_setting.get('system_prompt') or config.SYSTEM_PROMPT if active_setting else config.SYSTEM_PROMPT
+
+        response = await ai_service.generate_content(
             contents=contents,
-            config=GenerateContentConfig(
-                temperature=1,
-                max_output_tokens=6000,
-                system_instruction=config.SYSTEM_PROMPT,
-                tools=[tools.db_tool, tools.extra_tools],
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                safety_settings=[
-                    types.SafetySetting(category='HARM_CATEGORY_HATE_SPEECH', threshold='BLOCK_NONE'),
-                    types.SafetySetting(category='HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold='BLOCK_NONE'),
-                    types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
-                    types.SafetySetting(category='HARM_CATEGORY_HARASSMENT', threshold='BLOCK_NONE'),
-                ],
-            ),
+            system_instruction=system_prompt,
+            tools=provider_tools
         )
 
         candidate = response.candidates[0]
@@ -120,14 +123,21 @@ async def generate_gemini_response(content: types.Content, chat_id: str, app: we
             function_responses = []
             for fc in function_calls:
                 logging.info(f"Executing tool: {fc.name} with args: {fc.args}")
-                fc_res_part = await tools.handle_tool_call(fc, db_pool, client)
+                # We still use the global client instance for tool calls if needed, 
+                # but tools.handle_tool_call should be provider-agnostic if possible.
+                # For now, we pass the gemini client as it's the only one using tools.
+                gemini_client = genai.Client(api_key=config.GOOGLE_API_KEY)
+                fc_res_part = await tools.handle_tool_call(fc, db_pool, gemini_client)
+                # Pass back the ID for OpenAI/OpenRouter compatibility
+                if hasattr(fc, 'id') and fc.id:
+                    fc_res_part.function_response.id = fc.id
                 function_responses.append(fc_res_part)
             
             tool_content = types.Content(role="tool", parts=function_responses)
-            await generate_gemini_response(tool_content, chat_id, app, {}, chat_history=contents + [candidate.content])
+            await generate_ai_response(tool_content, chat_id, app, {}, chat_history=contents + [candidate.content])
 
     except Exception as e:
-        logging.exception("Error in generate_gemini_response:")
+        logging.exception("Error in generate_ai_response:")
         wa_config = config.get_whatsapp_config()
         await whatsapp_service.send_whatsapp_message(chat_id, "Maaf, terjadi kesalahan saat memproses permintaan Anda.", wa_config)
 
@@ -186,7 +196,7 @@ async def handle_whatsapp_message(message_data: dict, app: web.Application):
             
             parts.append(types.Part.from_text(text=message_text))
 
-        media_result = await whatsapp_service._process_media(message_data, client, wa_config)
+        media_result = await whatsapp_service._process_media(message_data, genai.Client(api_key=config.GOOGLE_API_KEY), wa_config)
         if media_result:
             google_uri, local_uri, mime_type, filename = media_result
             if google_uri and mime_type:
@@ -238,7 +248,7 @@ async def handle_whatsapp_message(message_data: dict, app: web.Application):
             await broadcast_to_websockets(app, message_to_broadcast)
 
             chat_history = await database.get_chat_history_from_db(db_pool, recipient_number)
-            await generate_gemini_response(content, recipient_number, app, user_message_dict, chat_history)
+            await generate_ai_response(content, recipient_number, app, user_message_dict, chat_history)
 
         if is_new_conversation:
             new_conversation_broadcast = {
@@ -329,6 +339,16 @@ async def admin_dashboard(request):
             return web.Response(text=f.read(), content_type='text/html')
     except FileNotFoundError:
         return web.Response(text="Admin page not found.", status=404)
+
+@require_auth
+async def admin_ai_settings(request):
+    """Serve AI settings page."""
+    html_path = TEMPLATES_DIR / 'ai_settings.html'
+    try:
+        with open(html_path, 'r', encoding='utf-8') as f:
+            return web.Response(text=f.read(), content_type='text/html')
+    except FileNotFoundError:
+        return web.Response(text="AI Settings page not found.", status=404)
 
 # --- API Handlers ---
 @require_auth
@@ -491,22 +511,22 @@ async def global_websocket_handler(request):
     return ws
 
 # --- Chat Summary ---
-async def generate_chat_summary(db_pool, chat_id, client):
-    """Generates a summary of the chat using Gemini."""
+async def generate_chat_summary(db_pool, chat_id, _):
+    """Generates a summary of the chat using active AI."""
     history = await database.get_chat_history_from_db(db_pool, chat_id)
     if not history:
         return "No chat history found."
     
-    prompt = "Please summarize the following conversation between a user and an AI assistant. Focus on the user's main intent and the outcome."
-    contents = [types.Content(role='user', parts=[types.Part.from_text(text=prompt)])] + history
-    
     try:
-        response = client.models.generate_content(
-            model=config.GOOGLE_MODEL,
-            contents=contents,
-            config=GenerateContentConfig(temperature=0.5, max_output_tokens=1000)
-        )
-        return response.text
+         # Summarize using the active AI service
+         active_setting = await database.get_active_ai_setting(db_pool)
+         temp_ai_service = AIService(active_setting)
+         
+         summary_prompt = "Please summarize the following conversation between a user and an AI assistant. Focus on the user's main intent and the outcome."
+         contents = [types.Content(role='user', parts=[types.Part.from_text(text=summary_prompt)])] + history
+         
+         response = await temp_ai_service.generate_content(contents=contents)
+         return response.text
     except Exception as e:
         logging.error(f"Error generating summary: {e}")
         return "Error generating summary."
@@ -539,7 +559,7 @@ async def generate_summary_handler(request):
     global db_pool
     chat_id = request.match_info.get('chat_id')
     try:
-         summary = await generate_chat_summary(db_pool, chat_id, client)
+         summary = await generate_chat_summary(db_pool, chat_id, None) # client param is now unused inside
          return web.json_response({'summary': summary})
     except Exception as e:
         return web.json_response({'error': str(e)}, status=500)
@@ -691,6 +711,60 @@ async def delete_auto_reply_handler(request):
     except database.DatabaseError as e:
         return web.json_response({'error': str(e)}, status=500)
 
+# --- AI Settings API ---
+@require_auth
+async def get_ai_settings_handler(request):
+    global db_pool
+    try:
+        settings = await database.get_ai_settings(db_pool)
+        # Handle datetime serialization
+        return web.json_response(settings, dumps=lambda x: json.dumps(x, default=lambda o: o.isoformat() if isinstance(o, datetime) else str(o)))
+    except database.DatabaseError as e:
+        return web.json_response({'error': str(e)}, status=500)
+
+@require_auth
+async def save_ai_setting_handler(request):
+    global db_pool, ai_service
+    data = await request.json()
+    try:
+        await database.save_ai_setting(
+            db_pool,
+            data.get('provider'),
+            data.get('model_name'),
+            data.get('api_key'),
+            data.get('system_prompt'),
+            data.get('is_active', False),
+            setting_id=data.get('id') # Support update by ID
+        )
+        # Reset local ai_service so it reloads on next use
+        ai_service = None 
+        return web.json_response({'success': True})
+    except database.DatabaseError as e:
+        return web.json_response({'error': str(e)}, status=500)
+
+@require_auth
+async def delete_ai_setting_handler(request):
+    global db_pool, ai_service
+    setting_id = request.match_info.get('id')
+    try:
+        await database.delete_ai_setting(db_pool, int(setting_id))
+        ai_service = None
+        return web.json_response({'success': True})
+    except database.DatabaseError as e:
+        return web.json_response({'error': str(e)}, status=500)
+
+@require_auth
+async def set_active_ai_handler(request):
+    global db_pool, ai_service
+    data = await request.json()
+    provider_id = data.get('id')
+    try:
+        await database.set_active_ai_provider(db_pool, provider_id)
+        ai_service = None
+        return web.json_response({'success': True})
+    except database.DatabaseError as e:
+        return web.json_response({'error': str(e)}, status=500)
+
 # --- Main Application ---
 async def main():
     global db_pool
@@ -715,6 +789,7 @@ async def main():
         web.post('/admin/login', admin_login_handler),
         web.post('/admin/logout', admin_logout_handler),
         web.get('/admin', admin_dashboard),
+        web.get('/admin/ai-settings', admin_ai_settings),
         
         # Conversations API
         web.get('/api/conversations', get_conversations),
@@ -744,6 +819,12 @@ async def main():
         web.get('/api/auto-replies', get_auto_replies_handler),
         web.post('/api/auto-replies', create_auto_reply_handler),
         web.delete('/api/auto-replies/{rule_id}', delete_auto_reply_handler),
+        
+        # AI Settings
+        web.get('/api/ai-settings', get_ai_settings_handler),
+        web.post('/api/ai-settings', save_ai_setting_handler),
+        web.delete('/api/ai-settings/{id}', delete_ai_setting_handler),
+        web.post('/api/ai-settings/activate', set_active_ai_handler),
         
         # WebSocket
         web.get('/ws/all', global_websocket_handler),
