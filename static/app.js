@@ -252,40 +252,44 @@ document.addEventListener('DOMContentLoaded', function () {
         const data = await res.json();
         if (data.error) return;
 
-        statTotalMessages.textContent = data.total_messages.toLocaleString();
-        statTotalChats.textContent = data.total_chats.toLocaleString();
+        if (statTotalMessages) statTotalMessages.textContent = data.total_messages.toLocaleString();
+        if (statTotalChats) statTotalChats.textContent = data.total_chats.toLocaleString();
 
         // Render daily chart
-        chartDaily.innerHTML = '';
-        if (data.daily_messages && data.daily_messages.length > 0) {
-            const max = Math.max(...data.daily_messages.map(d => d.count), 1);
-            data.daily_messages.forEach(d => {
-                const pct = (d.count / max * 100);
-                const bar = document.createElement('div');
-                bar.className = 'chart-bar';
-                bar.style.height = `${Math.max(pct, 5)}%`;
-                const dayLabel = d.date ? new Date(d.date).toLocaleDateString('id-ID', { weekday: 'short' }) : '?';
-                bar.innerHTML = `<span class="chart-bar-value">${d.count}</span><span class="chart-bar-label">${dayLabel}</span>`;
-                chartDaily.appendChild(bar);
-            });
-        } else {
-            chartDaily.innerHTML = '<span style="color: var(--text-muted); font-size: 0.8rem; padding: 20px;">Belum ada data</span>';
-        }
+        if (chartDaily) {
+            chartDaily.innerHTML = '';
+            if (data.daily_messages && data.daily_messages.length > 0) {
+                const max = Math.max(...data.daily_messages.map(d => d.count), 1);
+                data.daily_messages.forEach(d => {
+                    const pct = (d.count / max * 100);
+                    const bar = document.createElement('div');
+                    bar.className = 'chart-bar';
+                    bar.style.height = `${Math.max(pct, 5)}%`;
+                    const dayLabel = d.date ? new Date(d.date).toLocaleDateString('id-ID', { weekday: 'short' }) : '?';
+                    bar.innerHTML = `<span class="chart-bar-value">${d.count}</span><span class="chart-bar-label">${dayLabel}</span>`;
+                    chartDaily.appendChild(bar);
+                });
+            } else if (chartDaily) {
+                chartDaily.innerHTML = '<span style="color: var(--text-muted); font-size: 0.8rem; padding: 20px;">Belum ada data</span>';
+            }
 
-        // Top chats
-        topChatsList.innerHTML = '';
-        if (data.top_chats) {
-            data.top_chats.forEach((c, i) => {
-                const item = document.createElement('div');
-                item.className = 'mini-list-item';
-                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
-                item.innerHTML = `
+            // Top chats
+            if (topChatsList) {
+                topChatsList.innerHTML = '';
+                if (data.top_chats) {
+                    data.top_chats.forEach((c, i) => {
+                        const item = document.createElement('div');
+                        item.className = 'mini-list-item';
+                        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
+                        item.innerHTML = `
                     <span style="margin-right: 6px; font-size: 0.9rem;">${medal}</span>
                     <span class="item-text" style="font-size: 0.78rem;">${formatPhoneNumber(c.chat_id)}</span>
                     <span style="color: var(--accent-color); font-weight: 600; font-size: 0.8rem;">${c.count}</span>
                 `;
-                topChatsList.appendChild(item);
-            });
+                        topChatsList.appendChild(item);
+                    });
+                }
+            }
         }
     }
 
@@ -299,6 +303,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function renderConversationList(chats) {
+        if (!conversationsList) return;
         conversationsList.innerHTML = '';
         if (chats.length === 0) {
             conversationsList.innerHTML = `
@@ -720,7 +725,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 fetchTemplates();
                 showToast('Template dihapus', 'success');
             });
-            templatesList.appendChild(item);
+            if (templatesList) templatesList.appendChild(item);
         });
     }
 
@@ -747,6 +752,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function renderAutoReplies(rules) {
+        if (!autoRepliesList) return;
         autoRepliesList.innerHTML = '';
         if (!rules || rules.length === 0) {
             autoRepliesList.innerHTML = '<div style="padding: 10px; color: var(--text-muted); font-size: 0.78rem; text-align: center;"><i class="bi bi-reply"></i> Belum ada aturan</div>';
@@ -767,23 +773,25 @@ document.addEventListener('DOMContentLoaded', function () {
                 fetchAutoReplies();
                 showToast('Aturan dihapus', 'success');
             });
-            autoRepliesList.appendChild(item);
+            if (autoRepliesList) autoRepliesList.appendChild(item);
         });
     }
 
-    btnAddAr.addEventListener('click', async () => {
-        const keyword = arKeyword.value.trim();
-        const response = arResponse.value.trim();
-        if (!keyword || !response) return showToast('Isi keyword dan respon', 'error');
-        await apiFetch('/api/auto-replies', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ keyword, response })
+    if (btnAddAr) {
+        btnAddAr.addEventListener('click', async () => {
+            const keyword = arKeyword.value.trim();
+            const response = arResponse.value.trim();
+            if (!keyword || !response) return showToast('Isi keyword dan respon', 'error');
+            await apiFetch('/api/auto-replies', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keyword, response })
+            });
+            arKeyword.value = ''; arResponse.value = '';
+            fetchAutoReplies();
+            showToast('Auto-reply ditambahkan ✅', 'success');
         });
-        arKeyword.value = ''; arResponse.value = '';
-        fetchAutoReplies();
-        showToast('Auto-reply ditambahkan ✅', 'success');
-    });
+    }
 
     // ===== WebSocket =====
     function setupGlobalWebSocket() {
