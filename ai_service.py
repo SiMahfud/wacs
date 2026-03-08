@@ -60,7 +60,7 @@ class OpenRouterProvider(AIProvider):
                     if hasattr(part, 'function_response') and part.function_response:
                         messages.append({
                             "role": "tool",
-                            "tool_call_id": getattr(part.function_response, 'id', part.function_response.name),
+                            "tool_call_id": getattr(part.function_response, 'id', None) or part.function_response.name,
                             "name": part.function_response.name,
                             "content": json.dumps(part.function_response.response) if isinstance(part.function_response.response, dict) else str(part.function_response.response)
                         })
@@ -78,7 +78,7 @@ class OpenRouterProvider(AIProvider):
                     parts_text += part.text
                 if hasattr(part, 'function_call') and part.function_call:
                     tool_calls.append({
-                        "id": getattr(part.function_call, 'id', part.function_call.name),
+                        "id": getattr(part.function_call, 'id', None) or part.function_call.name,
                         "type": "function",
                         "function": {
                             "name": part.function_call.name,
@@ -170,7 +170,7 @@ class OpenRouterProvider(AIProvider):
             def __init__(self, name, args, id=None):
                 self.name = name
                 self.args = args
-                self.id = id
+                self.id = id or name
         class MockPart:
             def __init__(self, t):
                 self.text = t

@@ -836,7 +836,7 @@ async def main():
 
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, 'localhost', 8123)
+    site = web.TCPSite(runner, '127.0.0.1', 8123)
     await site.start()
 
     logging.info("Server started, listening on http://localhost:8123")
